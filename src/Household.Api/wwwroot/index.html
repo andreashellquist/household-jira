@@ -1,0 +1,131 @@
+<!DOCTYPE html>
+<html lang="sv">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, user-scalable=no">
+  <meta name="theme-color" content="#0F172A">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <title>Hemma</title>
+  <link rel="manifest" href="manifest.webmanifest">
+  <link rel="icon" href="icon.svg" type="image/svg+xml">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700;800&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+<div id="app">
+  <header>
+    <h1>Hemma<span>.</span></h1>
+    <div class="today" id="todayLabel"></div>
+  </header>
+
+  <main>
+    <!-- Board -->
+    <section class="view active" id="view-board">
+      <div class="chips" id="catFilter"></div>
+      <div class="board" id="board"></div>
+      <button class="fab" id="fabAdd" aria-label="Ny uppgift">+</button>
+    </section>
+
+    <!-- Shopping -->
+    <section class="view" id="view-shop">
+      <form class="add-row" id="shopForm">
+        <input id="shopName" placeholder="Lägg till vara…" autocomplete="off">
+        <input id="shopQty" class="qty" placeholder="Antal" autocomplete="off">
+        <button type="submit" aria-label="Lägg till">+</button>
+      </form>
+      <div class="list-wrap" id="shopList"></div>
+    </section>
+
+    <!-- Meals -->
+    <section class="view" id="view-meals">
+      <div class="chips" style="padding-top:0">
+        <span class="chip" style="pointer-events:none">🍽 Middagar denna vecka</span>
+      </div>
+      <div class="list-wrap" id="mealList"></div>
+    </section>
+
+    <!-- Family -->
+    <section class="view" id="view-family">
+      <div class="stats" id="famStats"></div>
+      <form class="add-row" id="memberForm">
+        <input id="memberName" placeholder="Lägg till familjemedlem…" autocomplete="off">
+        <button type="submit" aria-label="Lägg till">+</button>
+      </form>
+      <div class="list-wrap" id="memberList"></div>
+    </section>
+  </main>
+
+  <nav id="nav">
+    <button data-view="board" class="active">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="4" width="5" height="16" rx="1"/><rect x="10" y="4" width="5" height="11" rx="1"/><rect x="17" y="4" width="4" height="7" rx="1"/></svg>
+      Tavla
+    </button>
+    <button data-view="shop">
+      <span class="badge" id="shopBadge" hidden></span>
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="9" cy="20" r="1.5"/><circle cx="17" cy="20" r="1.5"/><path d="M3 4h2l2.6 11h10.8L21 8H7"/></svg>
+      Inköp
+    </button>
+    <button data-view="meals">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M5 3v8M8 3v8M6.5 11v10M17 3c-2 1.5-3 3.5-3 6 0 2 1 3 3 3v9"/></svg>
+      Mat
+    </button>
+    <button data-view="family">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="9" cy="8" r="3.5"/><path d="M2.5 20c.7-3.5 3.4-5.5 6.5-5.5s5.8 2 6.5 5.5"/><circle cx="17.5" cy="9.5" r="2.5"/><path d="M16.5 14.6c2.6.3 4.5 2 5 5.4"/></svg>
+      Familj
+    </button>
+  </nav>
+</div>
+
+<!-- Chore edit sheet -->
+<div class="backdrop" id="backdrop"></div>
+<div class="sheet" id="choreSheet">
+  <h2 id="sheetTitle">Ny uppgift</h2>
+  <div class="field">
+    <input id="fTitle" placeholder="Vad behöver göras?" autocomplete="off">
+  </div>
+  <div class="field">
+    <label>Kategori</label>
+    <div class="chips" id="fCategory"></div>
+  </div>
+  <div class="field">
+    <label>Prioritet</label>
+    <div class="seg" id="fPriority"></div>
+  </div>
+  <div class="field">
+    <label>Vem?</label>
+    <div class="chips" id="fAssignee"></div>
+  </div>
+  <div class="row2">
+    <div class="field">
+      <label>Deadline</label>
+      <input type="date" id="fDue">
+    </div>
+    <div class="field">
+      <label>Upprepa</label>
+      <select id="fRecur">
+        <option value="">Aldrig</option>
+        <option value="1">Varje dag</option>
+        <option value="2">Varannan dag</option>
+        <option value="7">Varje vecka</option>
+        <option value="14">Varannan vecka</option>
+        <option value="30">Varje månad</option>
+      </select>
+    </div>
+  </div>
+  <div class="field">
+    <label>Anteckning</label>
+    <textarea id="fNotes" rows="2" placeholder="Valfritt…"></textarea>
+  </div>
+  <div class="actions">
+    <button class="btn-danger" id="fDelete" hidden>Ta bort</button>
+    <button class="btn-primary" id="fSave">Spara</button>
+  </div>
+</div>
+
+<div class="toast" id="toast"></div>
+<script src="app.js"></script>
+</body>
+</html>

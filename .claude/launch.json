@@ -1,0 +1,11 @@
+{
+  "version": "0.0.1",
+  "configurations": [
+    {
+      "name": "household-api",
+      "runtimeExecutable": "dotnet",
+      "runtimeArgs": ["run", "--project", "src/Household.Api", "--urls", "http://localhost:5240"],
+      "port": 5240
+    }
+  ]
+}

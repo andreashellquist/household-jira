@@ -1,0 +1,5 @@
+<Solution>
+  <Folder Name="/src/">
+    <Project Path="src/Household.Api/Household.Api.csproj" />
+  </Folder>
+</Solution>
