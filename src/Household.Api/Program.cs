@@ -69,6 +69,7 @@ app.MapPut("/api/chores/{id:int}", async (AppDb db, int id, Chore input) =>
     chore.AssigneeId = input.AssigneeId;
     chore.DueDate = input.DueDate;
     chore.RecurDays = input.RecurDays;
+    chore.Rotate = input.Rotate;
     await db.SaveChangesAsync();
     return Results.Ok(chore);
 });
@@ -85,17 +86,30 @@ app.MapPost("/api/chores/{id:int}/status", async (AppDb db, int id, StatusChange
     Chore? next = null;
     if (change.Status == ChoreStatus.Done && chore.RecurDays is int days)
     {
+        var assigneeId = chore.AssigneeId;
+        if (chore.Rotate)
+        {
+            // Hand the next occurrence to the next family member (by id order, wrapping around).
+            var memberIds = await db.Members.OrderBy(m => m.Id).Select(m => m.Id).ToListAsync();
+            if (memberIds.Count > 0)
+            {
+                var idx = chore.AssigneeId is int cur ? memberIds.IndexOf(cur) : -1;
+                assigneeId = memberIds[(idx + 1) % memberIds.Count];
+            }
+        }
         next = new Chore
         {
             Title = chore.Title,
             Notes = chore.Notes,
             Category = chore.Category,
             Priority = chore.Priority,
-            AssigneeId = chore.AssigneeId,
+            AssigneeId = assigneeId,
             DueDate = DateOnly.FromDateTime(DateTime.Today).AddDays(days),
             RecurDays = days,
+            Rotate = chore.Rotate,
         };
         chore.RecurDays = null; // the new occurrence carries the recurrence forward
+        chore.Rotate = false;
         db.Chores.Add(next);
     }
     await db.SaveChangesAsync();

@@ -17,8 +17,11 @@
 <body>
 <div id="app">
   <header>
-    <h1>Hemma<span>.</span></h1>
-    <div class="today" id="todayLabel"></div>
+    <div>
+      <h1>Hemma<span>.</span></h1>
+      <div class="today" id="todayLabel"></div>
+    </div>
+    <button class="me-avatar" id="meAvatar" aria-label="Vem är du?">?</button>
   </header>
 
   <main>
@@ -60,6 +63,7 @@
 
   <nav id="nav">
     <button data-view="board" class="active">
+      <span class="badge" id="boardBadge" hidden></span>
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="4" width="5" height="16" rx="1"/><rect x="10" y="4" width="5" height="11" rx="1"/><rect x="17" y="4" width="4" height="7" rx="1"/></svg>
       Tavla
     </button>
@@ -115,6 +119,14 @@
       </select>
     </div>
   </div>
+  <label class="toggle" id="fRotateField" hidden>
+    <div>
+      <div class="toggle-title">Turas om</div>
+      <div class="toggle-sub">Nästa gång går uppgiften till nästa person</div>
+    </div>
+    <input type="checkbox" id="fRotate">
+    <span class="switch"></span>
+  </label>
   <div class="field">
     <label>Anteckning</label>
     <textarea id="fNotes" rows="2" placeholder="Valfritt…"></textarea>
@@ -123,6 +135,13 @@
     <button class="btn-danger" id="fDelete" hidden>Ta bort</button>
     <button class="btn-primary" id="fSave">Spara</button>
   </div>
+</div>
+
+<!-- Who am I -->
+<div class="sheet" id="meSheet">
+  <h2>Vem är du?</h2>
+  <p class="sheet-hint">Välj dig själv så kan du snabbt se dina uppgifter.</p>
+  <div class="chips" id="mePicker"></div>
 </div>
 
 <div class="toast" id="toast"></div>

@@ -26,6 +26,8 @@ public class Chore
     public DateOnly? DueDate { get; set; }
     /// <summary>Days between occurrences; null = one-off. Completing a recurring chore spawns the next one.</summary>
     public int? RecurDays { get; set; }
+    /// <summary>When a recurring chore is completed, hand the next occurrence to the next family member.</summary>
+    public bool Rotate { get; set; }
     public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
     public DateTime? CompletedAt { get; set; }
 }

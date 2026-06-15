@@ -20,8 +20,19 @@ const COLUMNS = [
 const MEMBER_COLORS = ["#F59E0B", "#38BDF8", "#F472B6", "#34D399", "#A78BFA", "#FB923C"];
 const DOW = ["sön", "mån", "tis", "ons", "tor", "fre", "lör"];
 
-const state = { members: [], chores: [], shopping: [], meals: [], filter: null, editing: null };
+const state = {
+  members: [], chores: [], shopping: [], meals: [],
+  filter: null, editing: null,
+  me: Number(localStorage.getItem("hemma.me")) || null, // who's using this device
+  mine: false, // "Mitt" filter on the board
+};
 const $ = (id) => document.getElementById(id);
+
+function setMe(id) {
+  state.me = id;
+  if (id) localStorage.setItem("hemma.me", id);
+  else { localStorage.removeItem("hemma.me"); state.mine = false; }
+}
 
 const api = async (url, method = "GET", body) => {
   const res = await fetch(url, {
@@ -67,12 +78,29 @@ function dueLabel(iso) {
 }
 
 function renderCatFilter() {
-  $("catFilter").innerHTML = Object.entries(CATEGORIES)
+  const mineChip = `
+    <button class="chip mine ${state.mine ? "on" : ""}" data-mine>
+      <span class="dot" style="background:${memberById(state.me)?.color ?? "var(--text-dim)"}"></span>Mitt
+    </button>`;
+  $("catFilter").innerHTML = mineChip + Object.entries(CATEGORIES)
     .map(([key, c]) => `
       <button class="chip ${state.filter === key ? "on" : ""}" data-cat="${key}">
         <span class="dot" style="background:${c.color}"></span>${c.label}
       </button>`)
     .join("");
+}
+
+// Open chores that are due today or earlier — drives the "Tavla" nudge badge.
+function overdueCount() {
+  const today = todayISO();
+  return state.chores.filter((c) => c.status !== "done" && c.dueDate && c.dueDate <= today).length;
+}
+
+function renderBoardBadge() {
+  const n = overdueCount();
+  const badge = $("boardBadge");
+  badge.hidden = n === 0;
+  badge.textContent = n;
 }
 
 function cardHtml(chore) {
@@ -96,7 +124,10 @@ function cardHtml(chore) {
 
 function renderBoard() {
   renderCatFilter();
-  const chores = state.filter ? state.chores.filter((c) => c.category === state.filter) : state.chores;
+  renderBoardBadge();
+  let chores = state.chores;
+  if (state.filter) chores = chores.filter((c) => c.category === state.filter);
+  if (state.mine && state.me) chores = chores.filter((c) => c.assigneeId === state.me);
   $("board").innerHTML = COLUMNS.map((col) => {
     const items = chores.filter((c) => c.status === col.status);
     return `
@@ -116,11 +147,14 @@ async function advanceChore(id, status) {
   const { next } = await api(`/api/chores/${id}/status`, "POST", { status });
   if (next) {
     chore.recurDays = null;
+    chore.rotate = false;
     state.chores.push(next);
-    toast(`↻ Ny "${next.title}" skapad till ${next.dueDate}`);
+    const who = memberById(next.assigneeId);
+    toast(who ? `↻ Nästa gång: ${who.name}` : `↻ Ny uppgift skapad`);
     renderBoard();
   } else if (status === "done") {
     toast("Snyggt jobbat! 🎉");
+    renderBoard();
   }
 }
 
@@ -131,22 +165,32 @@ function openSheet(chore) {
   state.editing = chore ?? null;
   form.category = chore?.category ?? state.filter ?? "other";
   form.priority = chore?.priority ?? "normal";
-  form.assigneeId = chore?.assigneeId ?? null;
+  form.assigneeId = chore?.assigneeId ?? state.me ?? null;
   $("sheetTitle").textContent = chore ? "Redigera uppgift" : "Ny uppgift";
   $("fTitle").value = chore?.title ?? "";
   $("fDue").value = chore?.dueDate ?? "";
   $("fRecur").value = chore?.recurDays ?? "";
+  $("fRotate").checked = chore?.rotate ?? false;
   $("fNotes").value = chore?.notes ?? "";
   $("fDelete").hidden = !chore;
   renderSheetPickers();
+  updateRotateVisibility();
   $("backdrop").classList.add("open");
   $("choreSheet").classList.add("open");
   if (!chore) setTimeout(() => $("fTitle").focus(), 100);
 }
 
+// "Turas om" only makes sense for a recurring chore with at least two people.
+function updateRotateVisibility() {
+  const show = $("fRecur").value !== "" && state.members.length >= 2;
+  $("fRotateField").hidden = !show;
+  if (!show) $("fRotate").checked = false;
+}
+
 function closeSheet() {
   $("backdrop").classList.remove("open");
   $("choreSheet").classList.remove("open");
+  $("meSheet").classList.remove("open");
 }
 
 function renderSheetPickers() {
@@ -180,6 +224,7 @@ async function saveChore() {
     assigneeId: form.assigneeId,
     dueDate: $("fDue").value || null,
     recurDays: $("fRecur").value ? Number($("fRecur").value) : null,
+    rotate: $("fRecur").value !== "" && $("fRotate").checked,
   };
   if (state.editing) {
     const updated = await api(`/api/chores/${state.editing.id}`, "PUT", { ...payload, status: state.editing.status });
@@ -196,6 +241,35 @@ async function deleteChore() {
   state.chores = state.chores.filter((c) => c.id !== state.editing.id);
   closeSheet();
   renderBoard();
+}
+
+// ---------- Identity ("vem är du?") ----------
+function renderMeAvatar() {
+  const me = memberById(state.me);
+  const btn = $("meAvatar");
+  if (me) {
+    btn.classList.add("set");
+    btn.style.background = me.color;
+    btn.textContent = me.name.trim().split(/\s+/).map((w) => w[0]).slice(0, 2).join("").toUpperCase();
+  } else {
+    btn.classList.remove("set");
+    btn.style.background = "";
+    btn.textContent = "?";
+  }
+}
+
+function openMeSheet() {
+  $("mePicker").innerHTML =
+    state.members
+      .map((m) => `
+        <button class="chip ${state.me === m.id ? "on" : ""}" data-pick-me="${m.id}">
+          <span class="dot" style="background:${m.color}"></span>${esc(m.name)}
+        </button>`)
+      .join("") +
+    `<button class="chip ${state.me === null ? "on" : ""}" data-pick-me="">Ingen</button>` +
+    (state.members.length === 0 ? `<div class="empty">Lägg till familjemedlemmar under Familj först 👪</div>` : "");
+  $("backdrop").classList.add("open");
+  $("meSheet").classList.add("open");
 }
 
 // ---------- Shopping ----------
@@ -283,12 +357,23 @@ function switchView(name) {
 }
 
 document.addEventListener("click", async (e) => {
-  const t = e.target.closest("[data-view], [data-cat], [data-advance], .card, [data-shop-del], [data-shop], [data-mem-del], [data-pick-cat], [data-pick-pri], [data-pick-mem], #clearChecked");
+  const t = e.target.closest("[data-view], [data-cat], [data-mine], [data-pick-me], [data-advance], .card, [data-shop-del], [data-shop], [data-mem-del], [data-pick-cat], [data-pick-pri], [data-pick-mem], #clearChecked");
   if (!t) return;
 
   if (t.dataset.view) return switchView(t.dataset.view);
   if (t.dataset.cat !== undefined) {
     state.filter = state.filter === t.dataset.cat ? null : t.dataset.cat;
+    return renderBoard();
+  }
+  if (t.dataset.mine !== undefined) {
+    if (!state.me) return openMeSheet(); // can't filter "mine" until we know who you are
+    state.mine = !state.mine;
+    return renderBoard();
+  }
+  if (t.dataset.pickMe !== undefined) {
+    setMe(t.dataset.pickMe === "" ? null : Number(t.dataset.pickMe));
+    closeSheet();
+    renderMeAvatar();
     return renderBoard();
   }
   if (t.dataset.advance) {
@@ -322,10 +407,13 @@ document.addEventListener("click", async (e) => {
     return api(`/api/shopping/${item.id}/toggle`, "POST");
   }
   if (t.dataset.memDel) {
-    await api(`/api/members/${t.dataset.memDel}`, "DELETE");
-    state.members = state.members.filter((m) => m.id !== Number(t.dataset.memDel));
-    state.chores.forEach((c) => { if (c.assigneeId === Number(t.dataset.memDel)) c.assigneeId = null; });
+    const memId = Number(t.dataset.memDel);
+    await api(`/api/members/${memId}`, "DELETE");
+    state.members = state.members.filter((m) => m.id !== memId);
+    state.chores.forEach((c) => { if (c.assigneeId === memId) c.assigneeId = null; });
+    if (state.me === memId) setMe(null);
     renderFamily();
+    renderMeAvatar();
     return renderBoard();
   }
 });
@@ -334,6 +422,8 @@ $("fabAdd").addEventListener("click", () => openSheet(null));
 $("backdrop").addEventListener("click", closeSheet);
 $("fSave").addEventListener("click", saveChore);
 $("fDelete").addEventListener("click", deleteChore);
+$("meAvatar").addEventListener("click", openMeSheet);
+$("fRecur").addEventListener("change", updateRotateVisibility);
 
 $("shopForm").addEventListener("submit", async (e) => {
   e.preventDefault();
@@ -356,6 +446,7 @@ $("memberForm").addEventListener("submit", async (e) => {
   state.members.push(member);
   $("memberName").value = "";
   renderFamily();
+  renderMeAvatar();
 });
 
 $("mealList").addEventListener("change", (e) => {
@@ -371,6 +462,8 @@ $("mealList").addEventListener("keydown", (e) => {
   $("todayLabel").textContent = d.toLocaleDateString("sv-SE", { weekday: "long", day: "numeric", month: "long" });
   const data = await api("/api/bootstrap");
   Object.assign(state, { members: data.members, chores: data.chores, shopping: data.shopping, meals: data.meals });
+  if (state.me && !memberById(state.me)) setMe(null); // stale identity from a removed member
+  renderMeAvatar();
   renderBoard();
   renderShopping();
   renderMeals();
