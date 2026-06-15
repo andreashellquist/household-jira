@@ -84,6 +84,7 @@ public static class ShoppingAggregator
     public static string Format(double amount, string unit, string name)
     {
         var a = Math.Round(amount, 2);
+        if (a <= 0) return name; // e.g. "salt efter smak" — no meaningful quantity
         var num = a % 1 == 0 ? ((long)a).ToString() : a.ToString("0.##", CultureInfo.InvariantCulture);
         return string.Equals(unit, "st", StringComparison.OrdinalIgnoreCase)
             ? $"{num} {name}"

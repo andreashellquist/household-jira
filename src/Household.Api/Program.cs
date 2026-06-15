@@ -202,6 +202,28 @@ app.MapDelete("/api/recipes/{id:int}", async (AppDb db, int id) =>
     return deleted > 0 ? Results.NoContent() : Results.NotFound();
 });
 
+// Import a recipe from a URL by reading its schema.org Recipe JSON-LD.
+app.MapPost("/api/recipes/import", async (ImportRequest req, IHttpClientFactory factory) =>
+{
+    if (string.IsNullOrWhiteSpace(req.Url))
+        return Results.BadRequest(new { error = "Ange en länk." });
+    if (!RecipeImporter.IsAllowed(req.Url, out var error))
+        return Results.BadRequest(new { error });
+    var http = factory.CreateClient();
+    http.Timeout = TimeSpan.FromSeconds(15);
+    try
+    {
+        var recipe = await RecipeImporter.Import(req.Url, http);
+        return recipe is null
+            ? Results.Ok(new { found = false })
+            : Results.Ok(new { found = true, recipe });
+    }
+    catch
+    {
+        return Results.Ok(new { found = false });
+    }
+});
+
 // ---- ICA: push the upcoming week's ingredients + open shopping items as one self-scan list ----
 app.MapPost("/api/ica/push", async (AppDb db, IcaService ica) =>
 {

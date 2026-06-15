@@ -348,7 +348,7 @@ function ingredientRowHtml(ing = { name: "", amount: "", unit: "st" }) {
   return `
     <div class="ing-row">
       <input class="ing-name" placeholder="Ingrediens" value="${esc(ing.name)}" autocomplete="off">
-      <input class="ing-amt" type="number" inputmode="decimal" placeholder="0" value="${ing.amount ?? ""}">
+      <input class="ing-amt" type="number" inputmode="decimal" placeholder="0" value="${ing.amount || ""}">
       <select class="ing-unit">${UNITS.map((u) => `<option ${u === ing.unit ? "selected" : ""}>${u}</option>`).join("")}</select>
       <button type="button" class="ing-del" aria-label="Ta bort">×</button>
     </div>`;
@@ -357,6 +357,7 @@ function ingredientRowHtml(ing = { name: "", amount: "", unit: "st" }) {
 function openRecipeSheet(recipe) {
   state.editingRecipe = recipe ?? null;
   $("recipeSheetTitle").textContent = recipe ? "Redigera recept" : "Nytt recept";
+  $("rImportUrl").value = "";
   $("rName").value = recipe?.name ?? "";
   $("rSource").value = recipe?.source ?? "";
   $("rInstructions").value = recipe?.instructions ?? "";
@@ -404,6 +405,31 @@ async function deleteRecipe() {
   state.recipes = state.recipes.filter((r) => r.id !== state.editingRecipe.id);
   closeSheet();
   renderRecipes();
+}
+
+// Paste a recipe URL and pull name/ingredients/instructions from the page's structured data.
+async function importRecipeFromUrl() {
+  const url = $("rImportUrl").value.trim();
+  if (!url) return;
+  const btn = $("rImport");
+  btn.disabled = true;
+  btn.textContent = "Hämtar…";
+  try {
+    const res = await api("/api/recipes/import", "POST", { url });
+    if (!res.found) { toast("Hittade inget recept på sidan"); return; }
+    const r = res.recipe;
+    if (r.name) $("rName").value = r.name;
+    if (!$("rSource").value) $("rSource").value = url;
+    if (r.instructions) $("rInstructions").value = r.instructions;
+    const ings = r.ingredients.length ? r.ingredients : [undefined];
+    $("rIngredients").innerHTML = ings.map((i) => ingredientRowHtml(i)).join("");
+    toast(`Hämtade ${r.ingredients.length} ingredienser ✓`);
+  } catch {
+    toast("Kunde inte läsa länken");
+  } finally {
+    btn.disabled = false;
+    btn.textContent = "Hämta";
+  }
 }
 
 // ---------- Meal → recipe picker ----------
@@ -565,6 +591,7 @@ $("rAddIngredient").addEventListener("click", () => {
 });
 $("rSave").addEventListener("click", saveRecipe);
 $("rDelete").addEventListener("click", deleteRecipe);
+$("rImport").addEventListener("click", importRecipeFromUrl);
 $("icaPush").addEventListener("click", pushToIca);
 
 $("shopForm").addEventListener("submit", async (e) => {
