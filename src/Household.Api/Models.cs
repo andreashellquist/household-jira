@@ -47,6 +47,7 @@ public class Meal
     public DateOnly Date { get; set; }
     public MealSlot Slot { get; set; } = MealSlot.Dinner;
     public required string Title { get; set; }
+    public int? RecipeId { get; set; }  // links the planned meal to a recipe for shopping
 }
 
 public class AppDb(DbContextOptions<AppDb> options) : DbContext(options)
@@ -55,6 +56,7 @@ public class AppDb(DbContextOptions<AppDb> options) : DbContext(options)
     public DbSet<Chore> Chores => Set<Chore>();
     public DbSet<ShoppingItem> ShoppingItems => Set<ShoppingItem>();
     public DbSet<Meal> Meals => Set<Meal>();
+    public DbSet<Recipe> Recipes => Set<Recipe>();
 
     protected override void OnModelCreating(ModelBuilder b)
     {
@@ -63,5 +65,10 @@ public class AppDb(DbContextOptions<AppDb> options) : DbContext(options)
             .HasOne(c => c.Assignee)
             .WithMany()
             .OnDelete(DeleteBehavior.SetNull);
+        b.Entity<Recipe>()
+            .HasMany(r => r.Ingredients)
+            .WithOne()
+            .HasForeignKey(i => i.RecipeId)
+            .OnDelete(DeleteBehavior.Cascade);
     }
 }

@@ -19,12 +19,16 @@ const COLUMNS = [
 ];
 const MEMBER_COLORS = ["#F59E0B", "#38BDF8", "#F472B6", "#34D399", "#A78BFA", "#FB923C"];
 const DOW = ["sön", "mån", "tis", "ons", "tor", "fre", "lör"];
+const UNITS = ["st", "g", "kg", "dl", "l", "msk", "tsk", "krm", "förp", "klyfta", "näve"];
 
 const state = {
-  members: [], chores: [], shopping: [], meals: [],
+  members: [], chores: [], shopping: [], meals: [], recipes: [],
   filter: null, editing: null,
   me: Number(localStorage.getItem("hemma.me")) || null, // who's using this device
   mine: false, // "Mitt" filter on the board
+  icaConfigured: false,
+  editingRecipe: null,
+  mealPickDate: null,
 };
 const $ = (id) => document.getElementById(id);
 
@@ -189,8 +193,7 @@ function updateRotateVisibility() {
 
 function closeSheet() {
   $("backdrop").classList.remove("open");
-  $("choreSheet").classList.remove("open");
-  $("meSheet").classList.remove("open");
+  document.querySelectorAll(".sheet.open").forEach((s) => s.classList.remove("open"));
 }
 
 function renderSheetPickers() {
@@ -303,22 +306,146 @@ function renderMeals() {
   $("mealList").innerHTML = days
     .map(({ iso, d }) => {
       const meal = state.meals.find((m) => m.date === iso && m.slot === "dinner");
+      const linked = meal?.recipeId ? "linked" : "";
       return `
         <div class="meal-day ${iso === todayISO() ? "today" : ""}">
           <div class="day"><span class="dow">${DOW[d.getDay()]}</span><span class="dom">${d.getDate()}</span></div>
-          <input data-meal="${iso}" value="${esc(meal?.title ?? "")}" placeholder="Vad blir det till middag?" autocomplete="off">
+          <input class="${linked}" data-meal="${iso}" value="${esc(meal?.title ?? "")}" placeholder="Vad blir det till middag?" autocomplete="off">
+          <button class="recipe-pick" data-meal-pick="${iso}" aria-label="Välj recept">📖</button>
         </div>`;
     })
     .join("");
 }
 
-async function saveMeal(iso, title) {
+async function saveMeal(iso, title, recipeId = null) {
   const existing = state.meals.find((m) => m.date === iso && m.slot === "dinner");
-  if ((existing?.title ?? "") === title.trim()) return;
-  const result = await api("/api/meals", "PUT", { date: iso, slot: "dinner", title: title.trim() });
+  if ((existing?.title ?? "") === title.trim() && (existing?.recipeId ?? null) === recipeId) return;
+  const result = await api("/api/meals", "PUT", { date: iso, slot: "dinner", title: title.trim(), recipeId });
   state.meals = state.meals.filter((m) => !(m.date === iso && m.slot === "dinner"));
   if (result) state.meals.push(result);
   toast("Matplan sparad");
+}
+
+// ---------- Recipes ----------
+function renderRecipes() {
+  const q = ($("recipeSearch").value || "").toLowerCase();
+  const list = state.recipes.filter((r) => r.name.toLowerCase().includes(q));
+  $("recipeList").innerHTML =
+    list
+      .map((r) => `
+        <button class="recipe-card" data-recipe="${r.id}">
+          <div class="grow">
+            <div class="title">${esc(r.name)}</div>
+            <div class="sub">${r.ingredients.length} ingredienser${r.source ? " · " + esc(r.source) : ""}</div>
+          </div>
+          <span class="chev">›</span>
+        </button>`)
+      .join("") ||
+    `<div class="empty">${state.recipes.length ? "Inga recept matchar" : "Lägg till ditt första recept 👆"}</div>`;
+}
+
+function ingredientRowHtml(ing = { name: "", amount: "", unit: "st" }) {
+  return `
+    <div class="ing-row">
+      <input class="ing-name" placeholder="Ingrediens" value="${esc(ing.name)}" autocomplete="off">
+      <input class="ing-amt" type="number" inputmode="decimal" placeholder="0" value="${ing.amount ?? ""}">
+      <select class="ing-unit">${UNITS.map((u) => `<option ${u === ing.unit ? "selected" : ""}>${u}</option>`).join("")}</select>
+      <button type="button" class="ing-del" aria-label="Ta bort">×</button>
+    </div>`;
+}
+
+function openRecipeSheet(recipe) {
+  state.editingRecipe = recipe ?? null;
+  $("recipeSheetTitle").textContent = recipe ? "Redigera recept" : "Nytt recept";
+  $("rName").value = recipe?.name ?? "";
+  $("rSource").value = recipe?.source ?? "";
+  $("rInstructions").value = recipe?.instructions ?? "";
+  $("rPreparations").value = recipe?.preparations ?? "";
+  const ings = recipe?.ingredients?.length ? recipe.ingredients : [undefined];
+  $("rIngredients").innerHTML = ings.map((i) => ingredientRowHtml(i)).join("");
+  $("rDelete").hidden = !recipe;
+  $("backdrop").classList.add("open");
+  $("recipeSheet").classList.add("open");
+  if (!recipe) setTimeout(() => $("rName").focus(), 100);
+}
+
+function collectIngredients() {
+  return [...$("rIngredients").querySelectorAll(".ing-row")]
+    .map((row) => ({
+      name: row.querySelector(".ing-name").value.trim(),
+      amount: Number(row.querySelector(".ing-amt").value) || 0,
+      unit: row.querySelector(".ing-unit").value,
+    }))
+    .filter((i) => i.name);
+}
+
+async function saveRecipe() {
+  const name = $("rName").value.trim();
+  if (!name) { $("rName").focus(); return; }
+  const payload = {
+    name,
+    source: $("rSource").value.trim() || null,
+    instructions: $("rInstructions").value.trim() || null,
+    preparations: $("rPreparations").value.trim() || null,
+    ingredients: collectIngredients(),
+  };
+  if (state.editingRecipe) {
+    const updated = await api(`/api/recipes/${state.editingRecipe.id}`, "PUT", payload);
+    Object.assign(state.editingRecipe, updated);
+  } else {
+    state.recipes.push(await api("/api/recipes", "POST", payload));
+  }
+  closeSheet();
+  renderRecipes();
+}
+
+async function deleteRecipe() {
+  await api(`/api/recipes/${state.editingRecipe.id}`, "DELETE");
+  state.recipes = state.recipes.filter((r) => r.id !== state.editingRecipe.id);
+  closeSheet();
+  renderRecipes();
+}
+
+// ---------- Meal → recipe picker ----------
+function openMealPick(iso) {
+  state.mealPickDate = iso;
+  const meal = state.meals.find((m) => m.date === iso && m.slot === "dinner");
+  $("mealPickList").innerHTML =
+    state.recipes
+      .map((r) => `<button class="chip ${meal?.recipeId === r.id ? "on" : ""}" data-pick-recipe="${r.id}">${esc(r.name)}</button>`)
+      .join("") +
+    (meal?.recipeId ? `<button class="chip" data-pick-recipe="">Koppla bort</button>` : "") +
+    (state.recipes.length ? "" : `<div class="empty">Inga recept ännu — lägg till under Recept 📖</div>`);
+  $("backdrop").classList.add("open");
+  $("mealPickSheet").classList.add("open");
+}
+
+async function pickRecipeForMeal(recipeId) {
+  const iso = state.mealPickDate;
+  const recipe = recipeId ? state.recipes.find((r) => r.id === recipeId) : null;
+  await saveMeal(iso, recipe?.name ?? "", recipe?.id ?? null);
+  closeSheet();
+  renderMeals();
+}
+
+// ---------- ICA push ----------
+async function pushToIca() {
+  toast("Skickar…");
+  const res = await api("/api/ica/push", "POST");
+  $("icaTitle").textContent = res.title;
+  const status = $("icaStatus");
+  if (res.sent) {
+    status.className = "ica-status ok";
+    status.textContent = `✓ Skickat till ICA — ${res.count} varor i "${res.title}"`;
+  } else {
+    status.className = "ica-status warn";
+    status.textContent = res.count === 0 ? "Inget att skicka — planera middagar eller fyll inköpslistan först." : `Kunde inte skicka: ${res.error}`;
+  }
+  $("icaRows").innerHTML =
+    res.rows.map((r) => `<div class="ica-line">${esc(r)}</div>`).join("") ||
+    `<div class="empty">Tom lista</div>`;
+  $("backdrop").classList.add("open");
+  $("icaSheet").classList.add("open");
 }
 
 // ---------- Family ----------
@@ -348,7 +475,7 @@ function esc(s) {
   return String(s).replace(/[&<>"']/g, (ch) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[ch]));
 }
 
-const RENDERERS = { board: renderBoard, shop: renderShopping, meals: renderMeals, family: renderFamily };
+const RENDERERS = { board: renderBoard, shop: renderShopping, recipes: renderRecipes, meals: renderMeals, family: renderFamily };
 
 function switchView(name) {
   document.querySelectorAll(".view").forEach((v) => v.classList.toggle("active", v.id === `view-${name}`));
@@ -357,8 +484,13 @@ function switchView(name) {
 }
 
 document.addEventListener("click", async (e) => {
-  const t = e.target.closest("[data-view], [data-cat], [data-mine], [data-pick-me], [data-advance], .card, [data-shop-del], [data-shop], [data-mem-del], [data-pick-cat], [data-pick-pri], [data-pick-mem], #clearChecked");
+  const t = e.target.closest("[data-view], [data-cat], [data-mine], [data-pick-me], [data-advance], .card, [data-shop-del], [data-shop], [data-mem-del], [data-pick-cat], [data-pick-pri], [data-pick-mem], #clearChecked, [data-recipe], [data-meal-pick], [data-pick-recipe], .ing-del");
   if (!t) return;
+
+  if (t.dataset.recipe) return openRecipeSheet(state.recipes.find((r) => r.id === Number(t.dataset.recipe)));
+  if (t.dataset.mealPick) return openMealPick(t.dataset.mealPick);
+  if (t.dataset.pickRecipe !== undefined) return pickRecipeForMeal(t.dataset.pickRecipe === "" ? null : Number(t.dataset.pickRecipe));
+  if (t.classList.contains("ing-del")) { e.preventDefault(); return t.closest(".ing-row").remove(); }
 
   if (t.dataset.view) return switchView(t.dataset.view);
   if (t.dataset.cat !== undefined) {
@@ -425,6 +557,16 @@ $("fDelete").addEventListener("click", deleteChore);
 $("meAvatar").addEventListener("click", openMeSheet);
 $("fRecur").addEventListener("change", updateRotateVisibility);
 
+$("recipeAdd").addEventListener("click", () => openRecipeSheet(null));
+$("recipeSearch").addEventListener("input", renderRecipes);
+$("rAddIngredient").addEventListener("click", () => {
+  $("rIngredients").insertAdjacentHTML("beforeend", ingredientRowHtml());
+  $("rIngredients").lastElementChild.querySelector(".ing-name").focus();
+});
+$("rSave").addEventListener("click", saveRecipe);
+$("rDelete").addEventListener("click", deleteRecipe);
+$("icaPush").addEventListener("click", pushToIca);
+
 $("shopForm").addEventListener("submit", async (e) => {
   e.preventDefault();
   const name = $("shopName").value.trim();
@@ -461,11 +603,15 @@ $("mealList").addEventListener("keydown", (e) => {
   const d = new Date();
   $("todayLabel").textContent = d.toLocaleDateString("sv-SE", { weekday: "long", day: "numeric", month: "long" });
   const data = await api("/api/bootstrap");
-  Object.assign(state, { members: data.members, chores: data.chores, shopping: data.shopping, meals: data.meals });
+  Object.assign(state, {
+    members: data.members, chores: data.chores, shopping: data.shopping,
+    meals: data.meals, recipes: data.recipes ?? [], icaConfigured: data.icaConfigured,
+  });
   if (state.me && !memberById(state.me)) setMe(null); // stale identity from a removed member
   renderMeAvatar();
   renderBoard();
   renderShopping();
   renderMeals();
+  renderRecipes();
   renderFamily();
 })();

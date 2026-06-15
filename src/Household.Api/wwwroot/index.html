@@ -42,10 +42,20 @@
       <div class="list-wrap" id="shopList"></div>
     </section>
 
+    <!-- Recipes -->
+    <section class="view" id="view-recipes">
+      <div class="add-row">
+        <input id="recipeSearch" placeholder="Sök recept…" autocomplete="off">
+        <button type="button" id="recipeAdd" aria-label="Nytt recept">+</button>
+      </div>
+      <div class="list-wrap" id="recipeList"></div>
+    </section>
+
     <!-- Meals -->
     <section class="view" id="view-meals">
-      <div class="chips" style="padding-top:0">
-        <span class="chip" style="pointer-events:none">🍽 Middagar denna vecka</span>
+      <div class="meal-head">
+        <span>🍽 Middagar denna vecka</span>
+        <button id="icaPush" class="ica-btn">Skicka till ICA</button>
       </div>
       <div class="list-wrap" id="mealList"></div>
     </section>
@@ -71,6 +81,10 @@
       <span class="badge" id="shopBadge" hidden></span>
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="9" cy="20" r="1.5"/><circle cx="17" cy="20" r="1.5"/><path d="M3 4h2l2.6 11h10.8L21 8H7"/></svg>
       Inköp
+    </button>
+    <button data-view="recipes">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 4.5A1.5 1.5 0 0 1 5.5 3H19a1 1 0 0 1 1 1v15a1 1 0 0 1-1 1H5.5A1.5 1.5 0 0 1 4 18.5z"/><path d="M4 17.5A1.5 1.5 0 0 1 5.5 16H20M8 7h7M8 10.5h7"/></svg>
+      Recept
     </button>
     <button data-view="meals">
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M5 3v8M8 3v8M6.5 11v10M17 3c-2 1.5-3 3.5-3 6 0 2 1 3 3 3v9"/></svg>
@@ -135,6 +149,47 @@
     <button class="btn-danger" id="fDelete" hidden>Ta bort</button>
     <button class="btn-primary" id="fSave">Spara</button>
   </div>
+</div>
+
+<!-- Recipe editor -->
+<div class="sheet" id="recipeSheet">
+  <h2 id="recipeSheetTitle">Nytt recept</h2>
+  <div class="field">
+    <input id="rName" placeholder="Receptets namn" autocomplete="off">
+  </div>
+  <div class="field">
+    <input id="rSource" placeholder="Kokbok & sida eller länk (valfritt)" autocomplete="off">
+  </div>
+  <div class="field">
+    <label>Ingredienser</label>
+    <div id="rIngredients"></div>
+    <button type="button" class="add-ingredient" id="rAddIngredient">+ Lägg till ingrediens</button>
+  </div>
+  <div class="field">
+    <label>Instruktioner</label>
+    <textarea id="rInstructions" rows="3" placeholder="Valfritt…"></textarea>
+  </div>
+  <div class="field">
+    <label>Förberedelser</label>
+    <textarea id="rPreparations" rows="2" placeholder="Valfritt…"></textarea>
+  </div>
+  <div class="actions">
+    <button class="btn-danger" id="rDelete" hidden>Ta bort</button>
+    <button class="btn-primary" id="rSave">Spara</button>
+  </div>
+</div>
+
+<!-- Pick a recipe for a meal slot -->
+<div class="sheet" id="mealPickSheet">
+  <h2 id="mealPickTitle">Välj recept</h2>
+  <div class="chips" id="mealPickList"></div>
+</div>
+
+<!-- ICA push result -->
+<div class="sheet" id="icaSheet">
+  <h2 id="icaTitle">Inköpslista</h2>
+  <div id="icaStatus" class="ica-status"></div>
+  <div id="icaRows" class="ica-rows"></div>
 </div>
 
 <!-- Who am I -->

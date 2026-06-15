@@ -4,8 +4,14 @@ using Microsoft.EntityFrameworkCore;
 
 var builder = WebApplication.CreateBuilder(args);
 
+// Local-only secrets (ICA login etc.) — gitignored, optional.
+builder.Configuration.AddJsonFile("appsettings.Local.json", optional: true, reloadOnChange: true);
+
 builder.Services.AddDbContext<AppDb>(o =>
     o.UseSqlite($"Data Source={Path.Combine(builder.Environment.ContentRootPath, "household.db")}"));
+
+builder.Services.AddHttpClient();
+builder.Services.AddScoped<IcaService>();
 
 builder.Services.ConfigureHttpJsonOptions(o =>
     o.SerializerOptions.Converters.Add(new JsonStringEnumConverter(System.Text.Json.JsonNamingPolicy.CamelCase)));
@@ -19,7 +25,7 @@ app.UseDefaultFiles();
 app.UseStaticFiles();
 
 // ---- Bootstrap: everything the app needs in one round-trip ----
-app.MapGet("/api/bootstrap", async (AppDb db) =>
+app.MapGet("/api/bootstrap", async (AppDb db, IcaService scopedIca) =>
 {
     var doneCutoff = DateTime.UtcNow.AddDays(-7);
     return new
@@ -32,7 +38,9 @@ app.MapGet("/api/bootstrap", async (AppDb db) =>
         Shopping = await db.ShoppingItems.OrderBy(i => i.Checked).ThenByDescending(i => i.CreatedAt).ToListAsync(),
         Meals = await db.Meals
             .Where(m => m.Date >= DateOnly.FromDateTime(DateTime.Today.AddDays(-7)))
-            .OrderBy(m => m.Date).ToListAsync()
+            .OrderBy(m => m.Date).ToListAsync(),
+        Recipes = await db.Recipes.Include(r => r.Ingredients).OrderBy(r => r.Name).ToListAsync(),
+        IcaConfigured = scopedIca.IsConfigured,
     };
 });
 
@@ -161,9 +169,70 @@ app.MapPut("/api/meals", async (AppDb db, Meal input) =>
         return Results.NoContent();
     }
     if (meal is null) { meal = input; db.Meals.Add(meal); }
-    else meal.Title = input.Title;
+    else { meal.Title = input.Title; meal.RecipeId = input.RecipeId; }
     await db.SaveChangesAsync();
     return Results.Ok(meal);
+});
+
+// ---- Recipes ----
+app.MapPost("/api/recipes", async (AppDb db, Recipe recipe) =>
+{
+    db.Recipes.Add(recipe);
+    await db.SaveChangesAsync();
+    return Results.Created($"/api/recipes/{recipe.Id}", recipe);
+});
+
+app.MapPut("/api/recipes/{id:int}", async (AppDb db, int id, Recipe input) =>
+{
+    var recipe = await db.Recipes.Include(r => r.Ingredients).FirstOrDefaultAsync(r => r.Id == id);
+    if (recipe is null) return Results.NotFound();
+    recipe.Name = input.Name;
+    recipe.Source = input.Source;
+    recipe.Instructions = input.Instructions;
+    recipe.Preparations = input.Preparations;
+    recipe.Ingredients.Clear(); // simplest correct path: replace the ingredient set wholesale
+    recipe.Ingredients.AddRange(input.Ingredients);
+    await db.SaveChangesAsync();
+    return Results.Ok(recipe);
+});
+
+app.MapDelete("/api/recipes/{id:int}", async (AppDb db, int id) =>
+{
+    var deleted = await db.Recipes.Where(r => r.Id == id).ExecuteDeleteAsync();
+    return deleted > 0 ? Results.NoContent() : Results.NotFound();
+});
+
+// ---- ICA: push the upcoming week's ingredients + open shopping items as one self-scan list ----
+app.MapPost("/api/ica/push", async (AppDb db, IcaService ica) =>
+{
+    var today = DateOnly.FromDateTime(DateTime.Today);
+    var weekEnd = today.AddDays(7);
+
+    var plannedRecipeIds = await db.Meals
+        .Where(m => m.RecipeId != null && m.Date >= today && m.Date < weekEnd)
+        .Select(m => m.RecipeId!.Value)
+        .ToListAsync();
+
+    // A recipe planned N times contributes its ingredients N times, so quantities scale naturally.
+    var ingredients = new List<RecipeIngredient>();
+    if (plannedRecipeIds.Count > 0)
+    {
+        var recipes = await db.Recipes.Include(r => r.Ingredients)
+            .Where(r => plannedRecipeIds.Contains(r.Id)).ToListAsync();
+        var byId = recipes.ToDictionary(r => r.Id);
+        foreach (var rid in plannedRecipeIds)
+            if (byId.TryGetValue(rid, out var r)) ingredients.AddRange(r.Ingredients);
+    }
+
+    var rows = ShoppingAggregator.Aggregate(ingredients);
+
+    // Append the open (unchecked) manual shopping items.
+    var openItems = await db.ShoppingItems.Where(i => !i.Checked).OrderByDescending(i => i.CreatedAt).ToListAsync();
+    rows.AddRange(openItems.Select(i => string.IsNullOrWhiteSpace(i.Qty) ? i.Name : $"{i.Qty} {i.Name}"));
+
+    var title = $"Hemma v.{System.Globalization.ISOWeek.GetWeekOfYear(DateTime.Today)}";
+    var (sent, error) = await ica.PushList(title, rows);
+    return Results.Ok(new { sent, error, title, rows, count = rows.Count });
 });
 
 app.Run();
