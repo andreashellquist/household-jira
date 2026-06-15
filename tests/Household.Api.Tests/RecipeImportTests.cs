@@ -70,6 +70,9 @@ public class HtmlExtractionTests
             {
               "@type": ["Recipe"],
               "name": "Klassiska pannkakor",
+              "recipeYield": "4 portioner",
+              "totalTime": "PT1H30M",
+              "image": { "@type": "ImageObject", "url": "https://example.com/p.jpg" },
               "recipeIngredient": ["3 dl vetemjöl", "5 dl mjölk", "2 ägg", "1 krm salt"],
               "recipeInstructions": [
                 { "@type": "HowToStep", "text": "Vispa ihop mjöl och mjölk." },
@@ -96,6 +99,10 @@ public class HtmlExtractionTests
         Assert.Equal("vetemjöl", flour.Name);
         Assert.Equal(3, flour.Amount, 3);
         Assert.Equal("dl", flour.Unit);
+
+        Assert.Equal(4, recipe.Servings);
+        Assert.Equal(90, recipe.CookMinutes); // 1h30m
+        Assert.Equal("https://example.com/p.jpg", recipe.ImageUrl);
     }
 
     [Fact]

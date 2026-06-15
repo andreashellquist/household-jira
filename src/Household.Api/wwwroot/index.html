@@ -158,11 +158,22 @@
     <input id="rImportUrl" type="url" inputmode="url" placeholder="Klistra in recept-länk…" autocomplete="off">
     <button type="button" id="rImport">Hämta</button>
   </div>
+  <img id="rImagePreview" class="recipe-image" alt="" hidden>
   <div class="field">
     <input id="rName" placeholder="Receptets namn" autocomplete="off">
   </div>
   <div class="field">
     <input id="rSource" placeholder="Kokbok & sida eller länk (valfritt)" autocomplete="off">
+  </div>
+  <div class="row2">
+    <div class="field">
+      <label>Portioner</label>
+      <input type="number" id="rServings" inputmode="numeric" min="1" value="4">
+    </div>
+    <div class="field">
+      <label>Tid (min)</label>
+      <input type="number" id="rCookMinutes" inputmode="numeric" min="0" placeholder="–">
+    </div>
   </div>
   <div class="field">
     <label>Ingredienser</label>
@@ -187,6 +198,18 @@
 <div class="sheet" id="mealPickSheet">
   <h2 id="mealPickTitle">Välj recept</h2>
   <div class="chips" id="mealPickList"></div>
+  <div class="field portions-field" id="mealPickPortions" hidden>
+    <label>Portioner</label>
+    <div class="stepper">
+      <button type="button" data-portions="-1" aria-label="Färre">−</button>
+      <span id="mealPickServings">4</span>
+      <button type="button" data-portions="1" aria-label="Fler">+</button>
+    </div>
+  </div>
+  <div class="actions" id="mealPickActions" hidden>
+    <button class="btn-danger" id="mealPickUnlink" hidden>Koppla bort</button>
+    <button class="btn-primary" id="mealPickSave">Spara</button>
+  </div>
 </div>
 
 <!-- ICA push result -->

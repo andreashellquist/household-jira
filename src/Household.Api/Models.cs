@@ -48,6 +48,7 @@ public class Meal
     public MealSlot Slot { get; set; } = MealSlot.Dinner;
     public required string Title { get; set; }
     public int? RecipeId { get; set; }  // links the planned meal to a recipe for shopping
+    public int? Servings { get; set; }  // portions to cook this day; scales the shopping quantities
 }
 
 public class AppDb(DbContextOptions<AppDb> options) : DbContext(options)

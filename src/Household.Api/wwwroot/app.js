@@ -307,20 +307,25 @@ function renderMeals() {
     .map(({ iso, d }) => {
       const meal = state.meals.find((m) => m.date === iso && m.slot === "dinner");
       const linked = meal?.recipeId ? "linked" : "";
+      const pill = meal?.recipeId && meal?.servings
+        ? `<button class="portions-pill" data-meal-pick="${iso}">${meal.servings} port</button>`
+        : "";
       return `
         <div class="meal-day ${iso === todayISO() ? "today" : ""}">
           <div class="day"><span class="dow">${DOW[d.getDay()]}</span><span class="dom">${d.getDate()}</span></div>
           <input class="${linked}" data-meal="${iso}" value="${esc(meal?.title ?? "")}" placeholder="Vad blir det till middag?" autocomplete="off">
+          ${pill}
           <button class="recipe-pick" data-meal-pick="${iso}" aria-label="Välj recept">📖</button>
         </div>`;
     })
     .join("");
 }
 
-async function saveMeal(iso, title, recipeId = null) {
+async function saveMeal(iso, title, recipeId = null, servings = null) {
   const existing = state.meals.find((m) => m.date === iso && m.slot === "dinner");
-  if ((existing?.title ?? "") === title.trim() && (existing?.recipeId ?? null) === recipeId) return;
-  const result = await api("/api/meals", "PUT", { date: iso, slot: "dinner", title: title.trim(), recipeId });
+  if ((existing?.title ?? "") === title.trim() && (existing?.recipeId ?? null) === recipeId &&
+      (existing?.servings ?? null) === servings) return;
+  const result = await api("/api/meals", "PUT", { date: iso, slot: "dinner", title: title.trim(), recipeId, servings });
   state.meals = state.meals.filter((m) => !(m.date === iso && m.slot === "dinner"));
   if (result) state.meals.push(result);
   toast("Matplan sparad");
@@ -332,16 +337,27 @@ function renderRecipes() {
   const list = state.recipes.filter((r) => r.name.toLowerCase().includes(q));
   $("recipeList").innerHTML =
     list
-      .map((r) => `
+      .map((r) => {
+        const meta = [`${r.ingredients.length} ingredienser`];
+        if (r.cookMinutes) meta.push(`⏱ ${r.cookMinutes} min`);
+        if (r.servings) meta.push(`${r.servings} port`);
+        return `
         <button class="recipe-card" data-recipe="${r.id}">
+          ${r.imageUrl ? `<img class="thumb" src="${esc(r.imageUrl)}" alt="" loading="lazy">` : ""}
           <div class="grow">
             <div class="title">${esc(r.name)}</div>
-            <div class="sub">${r.ingredients.length} ingredienser${r.source ? " · " + esc(r.source) : ""}</div>
+            <div class="sub">${meta.join(" · ")}</div>
           </div>
           <span class="chev">›</span>
-        </button>`)
+        </button>`;
+      })
       .join("") ||
     `<div class="empty">${state.recipes.length ? "Inga recept matchar" : "Lägg till ditt första recept 👆"}</div>`;
+}
+
+function setRecipeImage(url) {
+  const img = $("rImagePreview");
+  if (url) { img.src = url; img.hidden = false; } else { img.hidden = true; img.removeAttribute("src"); }
 }
 
 function ingredientRowHtml(ing = { name: "", amount: "", unit: "st" }) {
@@ -360,8 +376,12 @@ function openRecipeSheet(recipe) {
   $("rImportUrl").value = "";
   $("rName").value = recipe?.name ?? "";
   $("rSource").value = recipe?.source ?? "";
+  $("rServings").value = recipe?.servings ?? 4;
+  $("rCookMinutes").value = recipe?.cookMinutes ?? "";
   $("rInstructions").value = recipe?.instructions ?? "";
   $("rPreparations").value = recipe?.preparations ?? "";
+  state.editingImageUrl = recipe?.imageUrl ?? null;
+  setRecipeImage(state.editingImageUrl);
   const ings = recipe?.ingredients?.length ? recipe.ingredients : [undefined];
   $("rIngredients").innerHTML = ings.map((i) => ingredientRowHtml(i)).join("");
   $("rDelete").hidden = !recipe;
@@ -386,6 +406,9 @@ async function saveRecipe() {
   const payload = {
     name,
     source: $("rSource").value.trim() || null,
+    servings: Number($("rServings").value) || 4,
+    cookMinutes: $("rCookMinutes").value ? Number($("rCookMinutes").value) : null,
+    imageUrl: state.editingImageUrl,
     instructions: $("rInstructions").value.trim() || null,
     preparations: $("rPreparations").value.trim() || null,
     ingredients: collectIngredients(),
@@ -420,6 +443,9 @@ async function importRecipeFromUrl() {
     const r = res.recipe;
     if (r.name) $("rName").value = r.name;
     if (!$("rSource").value) $("rSource").value = url;
+    if (r.servings) $("rServings").value = r.servings;
+    if (r.cookMinutes) $("rCookMinutes").value = r.cookMinutes;
+    if (r.imageUrl) { state.editingImageUrl = r.imageUrl; setRecipeImage(r.imageUrl); }
     if (r.instructions) $("rInstructions").value = r.instructions;
     const ings = r.ingredients.length ? r.ingredients : [undefined];
     $("rIngredients").innerHTML = ings.map((i) => ingredientRowHtml(i)).join("");
@@ -432,24 +458,57 @@ async function importRecipeFromUrl() {
   }
 }
 
-// ---------- Meal → recipe picker ----------
+// ---------- Meal → recipe picker (with portions) ----------
 function openMealPick(iso) {
-  state.mealPickDate = iso;
   const meal = state.meals.find((m) => m.date === iso && m.slot === "dinner");
-  $("mealPickList").innerHTML =
-    state.recipes
-      .map((r) => `<button class="chip ${meal?.recipeId === r.id ? "on" : ""}" data-pick-recipe="${r.id}">${esc(r.name)}</button>`)
-      .join("") +
-    (meal?.recipeId ? `<button class="chip" data-pick-recipe="">Koppla bort</button>` : "") +
-    (state.recipes.length ? "" : `<div class="empty">Inga recept ännu — lägg till under Recept 📖</div>`);
+  const recipe = meal?.recipeId ? state.recipes.find((r) => r.id === meal.recipeId) : null;
+  state.mealPick = {
+    date: iso,
+    recipeId: meal?.recipeId ?? null,
+    servings: meal?.servings ?? recipe?.servings ?? 4,
+    wasLinked: !!meal?.recipeId,
+  };
+  renderMealPick();
   $("backdrop").classList.add("open");
   $("mealPickSheet").classList.add("open");
 }
 
-async function pickRecipeForMeal(recipeId) {
-  const iso = state.mealPickDate;
-  const recipe = recipeId ? state.recipes.find((r) => r.id === recipeId) : null;
-  await saveMeal(iso, recipe?.name ?? "", recipe?.id ?? null);
+function renderMealPick() {
+  const p = state.mealPick;
+  $("mealPickList").innerHTML =
+    state.recipes
+      .map((r) => `<button class="chip ${p.recipeId === r.id ? "on" : ""}" data-pick-recipe="${r.id}">${esc(r.name)}</button>`)
+      .join("") ||
+    `<div class="empty">Inga recept ännu — lägg till under Recept 📖</div>`;
+  const hasSelection = p.recipeId != null;
+  $("mealPickPortions").hidden = !hasSelection;
+  $("mealPickActions").hidden = !hasSelection && !p.wasLinked;
+  $("mealPickServings").textContent = p.servings;
+  $("mealPickUnlink").hidden = !p.wasLinked;
+}
+
+function selectRecipeInPick(recipeId) {
+  const recipe = state.recipes.find((r) => r.id === recipeId);
+  state.mealPick.recipeId = recipeId;
+  state.mealPick.servings = recipe?.servings ?? 4;
+  renderMealPick();
+}
+
+function adjustPickPortions(delta) {
+  state.mealPick.servings = Math.max(1, state.mealPick.servings + delta);
+  renderMealPick();
+}
+
+async function saveMealPick() {
+  const p = state.mealPick;
+  const recipe = state.recipes.find((r) => r.id === p.recipeId);
+  if (recipe) await saveMeal(p.date, recipe.name, recipe.id, p.servings);
+  closeSheet();
+  renderMeals();
+}
+
+async function unlinkMeal() {
+  await saveMeal(state.mealPick.date, "", null, null);
   closeSheet();
   renderMeals();
 }
@@ -510,12 +569,13 @@ function switchView(name) {
 }
 
 document.addEventListener("click", async (e) => {
-  const t = e.target.closest("[data-view], [data-cat], [data-mine], [data-pick-me], [data-advance], .card, [data-shop-del], [data-shop], [data-mem-del], [data-pick-cat], [data-pick-pri], [data-pick-mem], #clearChecked, [data-recipe], [data-meal-pick], [data-pick-recipe], .ing-del");
+  const t = e.target.closest("[data-view], [data-cat], [data-mine], [data-pick-me], [data-advance], .card, [data-shop-del], [data-shop], [data-mem-del], [data-pick-cat], [data-pick-pri], [data-pick-mem], #clearChecked, [data-recipe], [data-meal-pick], [data-pick-recipe], [data-portions], .ing-del");
   if (!t) return;
 
   if (t.dataset.recipe) return openRecipeSheet(state.recipes.find((r) => r.id === Number(t.dataset.recipe)));
   if (t.dataset.mealPick) return openMealPick(t.dataset.mealPick);
-  if (t.dataset.pickRecipe !== undefined) return pickRecipeForMeal(t.dataset.pickRecipe === "" ? null : Number(t.dataset.pickRecipe));
+  if (t.dataset.pickRecipe !== undefined) return selectRecipeInPick(Number(t.dataset.pickRecipe));
+  if (t.dataset.portions) return adjustPickPortions(Number(t.dataset.portions));
   if (t.classList.contains("ing-del")) { e.preventDefault(); return t.closest(".ing-row").remove(); }
 
   if (t.dataset.view) return switchView(t.dataset.view);
@@ -592,6 +652,8 @@ $("rAddIngredient").addEventListener("click", () => {
 $("rSave").addEventListener("click", saveRecipe);
 $("rDelete").addEventListener("click", deleteRecipe);
 $("rImport").addEventListener("click", importRecipeFromUrl);
+$("mealPickSave").addEventListener("click", saveMealPick);
+$("mealPickUnlink").addEventListener("click", unlinkMeal);
 $("icaPush").addEventListener("click", pushToIca);
 
 $("shopForm").addEventListener("submit", async (e) => {

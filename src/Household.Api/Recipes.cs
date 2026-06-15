@@ -11,6 +11,9 @@ public class Recipe
     public string? Source { get; set; }       // cookbook page or a URL
     public string? Instructions { get; set; }
     public string? Preparations { get; set; }
+    public int Servings { get; set; } = 4;    // portions the ingredient amounts are written for
+    public int? CookMinutes { get; set; }
+    public string? ImageUrl { get; set; }
     public List<RecipeIngredient> Ingredients { get; set; } = new();
 }
 

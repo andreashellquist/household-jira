@@ -169,7 +169,7 @@ app.MapPut("/api/meals", async (AppDb db, Meal input) =>
         return Results.NoContent();
     }
     if (meal is null) { meal = input; db.Meals.Add(meal); }
-    else { meal.Title = input.Title; meal.RecipeId = input.RecipeId; }
+    else { meal.Title = input.Title; meal.RecipeId = input.RecipeId; meal.Servings = input.Servings; }
     await db.SaveChangesAsync();
     return Results.Ok(meal);
 });
@@ -190,6 +190,9 @@ app.MapPut("/api/recipes/{id:int}", async (AppDb db, int id, Recipe input) =>
     recipe.Source = input.Source;
     recipe.Instructions = input.Instructions;
     recipe.Preparations = input.Preparations;
+    recipe.Servings = input.Servings;
+    recipe.CookMinutes = input.CookMinutes;
+    recipe.ImageUrl = input.ImageUrl;
     recipe.Ingredients.Clear(); // simplest correct path: replace the ingredient set wholesale
     recipe.Ingredients.AddRange(input.Ingredients);
     await db.SaveChangesAsync();
@@ -230,20 +233,25 @@ app.MapPost("/api/ica/push", async (AppDb db, IcaService ica) =>
     var today = DateOnly.FromDateTime(DateTime.Today);
     var weekEnd = today.AddDays(7);
 
-    var plannedRecipeIds = await db.Meals
+    var plannedMeals = await db.Meals
         .Where(m => m.RecipeId != null && m.Date >= today && m.Date < weekEnd)
-        .Select(m => m.RecipeId!.Value)
+        .Select(m => new { RecipeId = m.RecipeId!.Value, m.Servings })
         .ToListAsync();
 
-    // A recipe planned N times contributes its ingredients N times, so quantities scale naturally.
+    // Each planned meal contributes its recipe's ingredients, scaled to the portions being cooked.
     var ingredients = new List<RecipeIngredient>();
-    if (plannedRecipeIds.Count > 0)
+    if (plannedMeals.Count > 0)
     {
-        var recipes = await db.Recipes.Include(r => r.Ingredients)
-            .Where(r => plannedRecipeIds.Contains(r.Id)).ToListAsync();
-        var byId = recipes.ToDictionary(r => r.Id);
-        foreach (var rid in plannedRecipeIds)
-            if (byId.TryGetValue(rid, out var r)) ingredients.AddRange(r.Ingredients);
+        var recipeIds = plannedMeals.Select(m => m.RecipeId).Distinct().ToList();
+        var byId = await db.Recipes.Include(r => r.Ingredients)
+            .Where(r => recipeIds.Contains(r.Id)).ToDictionaryAsync(r => r.Id);
+        foreach (var meal in plannedMeals)
+        {
+            if (!byId.TryGetValue(meal.RecipeId, out var r)) continue;
+            var scale = meal.Servings is int s && s > 0 && r.Servings > 0 ? (double)s / r.Servings : 1.0;
+            ingredients.AddRange(r.Ingredients.Select(i =>
+                new RecipeIngredient { Name = i.Name, Amount = i.Amount * scale, Unit = i.Unit }));
+        }
     }
 
     var rows = ShoppingAggregator.Aggregate(ingredients);

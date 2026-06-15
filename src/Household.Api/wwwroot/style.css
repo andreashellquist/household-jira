@@ -296,6 +296,28 @@ nav button .badge {
 .recipe-card .title { font-weight: 700; font-size: 15px; }
 .recipe-card .sub { color: var(--text-dim); font-size: 12.5px; margin-top: 2px; }
 .recipe-card .chev { color: var(--text-dim); font-size: 20px; }
+.recipe-card .thumb {
+  flex: 0 0 48px; width: 48px; height: 48px; border-radius: 9px;
+  object-fit: cover; background: var(--surface-2);
+}
+.recipe-image {
+  display: block; width: 100%; height: 150px; object-fit: cover;
+  border-radius: 12px; margin-bottom: 14px;
+}
+.recipe-image[hidden] { display: none; }
+
+/* Stepper + portions */
+.stepper { display: inline-flex; align-items: center; gap: 0; background: var(--surface-2); border-radius: 10px; overflow: hidden; }
+.stepper button { width: 42px; height: 42px; font-size: 20px; font-weight: 700; color: var(--accent); }
+.stepper span { min-width: 44px; text-align: center; font-weight: 800; font-size: 16px; }
+.portions-field .stepper { margin-top: 2px; }
+
+.meal-day .portions-pill {
+  flex: 0 0 auto; padding: 0 9px; height: 40px; border-radius: 10px;
+  background: var(--surface); border: 1px solid var(--line);
+  color: var(--done); font-size: 12.5px; font-weight: 700;
+  display: flex; align-items: center; white-space: nowrap;
+}
 
 .import-row { display: flex; gap: 8px; }
 .import-row input { flex: 1; }

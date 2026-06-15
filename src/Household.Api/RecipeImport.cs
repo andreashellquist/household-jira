@@ -8,7 +8,9 @@ namespace Household.Api;
 
 public record ImportRequest(string Url);
 
-public record ImportedRecipe(string? Name, string? Instructions, List<RecipeIngredient> Ingredients);
+public record ImportedRecipe(
+    string? Name, string? Instructions, List<RecipeIngredient> Ingredients,
+    int? Servings, int? CookMinutes, string? ImageUrl);
 
 /// <summary>
 /// Imports a recipe from a URL by reading the page's schema.org Recipe JSON-LD
@@ -86,8 +88,52 @@ public static partial class RecipeImporter
             ? string.Join("\n", FlattenInstructions(instr)).Trim()
             : null;
 
-        return new ImportedRecipe(name, string.IsNullOrWhiteSpace(instructions) ? null : instructions, ingredients);
+        var servings = recipe.Value.TryGetProperty("recipeYield", out var y) ? ParseYield(y) : null;
+        int? cookMinutes = null;
+        foreach (var prop in new[] { "totalTime", "cookTime" })
+            if (recipe.Value.TryGetProperty(prop, out var t) && t.ValueKind == JsonValueKind.String &&
+                ParseIsoMinutes(t.GetString()!) is { } mins) { cookMinutes = mins; break; }
+        var imageUrl = recipe.Value.TryGetProperty("image", out var img) ? ParseImage(img) : null;
+
+        return new ImportedRecipe(
+            name,
+            string.IsNullOrWhiteSpace(instructions) ? null : instructions,
+            ingredients, servings, cookMinutes, imageUrl);
     }
+
+    // recipeYield: a number, "4", or "4 portioner" — grab the first integer.
+    private static int? ParseYield(JsonElement y)
+    {
+        var raw = y.ValueKind switch
+        {
+            JsonValueKind.Number => y.GetRawText(),
+            JsonValueKind.String => y.GetString(),
+            JsonValueKind.Array => y.EnumerateArray().FirstOrDefault().ToString(),
+            _ => null,
+        };
+        var m = raw is null ? Match.Empty : Regex.Match(raw, @"\d+");
+        return m.Success && int.TryParse(m.Value, out var n) && n is > 0 and <= 99 ? n : null;
+    }
+
+    // ISO-8601 duration like "PT1H30M" -> total minutes.
+    private static int? ParseIsoMinutes(string iso)
+    {
+        var m = Regex.Match(iso, @"^P(?:T)?(?:(\d+)H)?(?:(\d+)M)?", RegexOptions.IgnoreCase);
+        if (!m.Success) return null;
+        var h = m.Groups[1].Success ? int.Parse(m.Groups[1].Value) : 0;
+        var min = m.Groups[2].Success ? int.Parse(m.Groups[2].Value) : 0;
+        var total = h * 60 + min;
+        return total > 0 ? total : null;
+    }
+
+    // image: a URL string, { "url": ... }, or an array of either.
+    private static string? ParseImage(JsonElement img) => img.ValueKind switch
+    {
+        JsonValueKind.String => img.GetString(),
+        JsonValueKind.Object => img.TryGetProperty("url", out var u) ? u.GetString() : null,
+        JsonValueKind.Array => img.EnumerateArray().Select(ParseImage).FirstOrDefault(s => !string.IsNullOrWhiteSpace(s)),
+        _ => null,
+    };
 
     // ---- JSON-LD discovery ----
     private static JsonElement? FindRecipeNode(string html)
