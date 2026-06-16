@@ -40,6 +40,7 @@ app.MapGet("/api/bootstrap", async (AppDb db, IcaService scopedIca) =>
             .Where(m => m.Date >= DateOnly.FromDateTime(DateTime.Today.AddDays(-7)))
             .OrderBy(m => m.Date).ToListAsync(),
         Recipes = await db.Recipes.Include(r => r.Ingredients).OrderBy(r => r.Name).ToListAsync(),
+        Staples = await db.Staples.OrderByDescending(s => s.Count).ThenByDescending(s => s.LastUsed).Take(8).ToListAsync(),
         IcaConfigured = scopedIca.IsConfigured,
     };
 });
@@ -134,6 +135,19 @@ app.MapDelete("/api/chores/{id:int}", async (AppDb db, int id) =>
 app.MapPost("/api/shopping", async (AppDb db, ShoppingItem item) =>
 {
     db.ShoppingItems.Add(item);
+
+    // Learn this item as a staple (for quick-add chips), keyed case-insensitively by name.
+    var name = item.Name.Trim();
+    var staple = await db.Staples.FirstOrDefaultAsync(s => s.Name.ToLower() == name.ToLower());
+    if (staple is null)
+        db.Staples.Add(new Staple { Name = name, Qty = item.Qty, Count = 1 });
+    else
+    {
+        staple.Count++;
+        staple.LastUsed = DateTime.UtcNow;
+        if (!string.IsNullOrWhiteSpace(item.Qty)) staple.Qty = item.Qty;
+    }
+
     await db.SaveChangesAsync();
     return Results.Created($"/api/shopping/{item.Id}", item);
 });
@@ -169,7 +183,7 @@ app.MapPut("/api/meals", async (AppDb db, Meal input) =>
         return Results.NoContent();
     }
     if (meal is null) { meal = input; db.Meals.Add(meal); }
-    else { meal.Title = input.Title; meal.RecipeId = input.RecipeId; meal.Servings = input.Servings; }
+    else { meal.Title = input.Title; meal.RecipeId = input.RecipeId; meal.Servings = input.Servings; meal.Kind = input.Kind; }
     await db.SaveChangesAsync();
     return Results.Ok(meal);
 });

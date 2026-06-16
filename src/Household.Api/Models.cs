@@ -5,6 +5,7 @@ namespace Household.Api;
 public enum ChoreStatus { Todo, Doing, Done }
 public enum Priority { Low, Normal, Urgent }
 public enum MealSlot { Lunch, Dinner }
+public enum MealKind { Cook, Leftovers, EatingOut }
 
 public class Member
 {
@@ -49,6 +50,17 @@ public class Meal
     public required string Title { get; set; }
     public int? RecipeId { get; set; }  // links the planned meal to a recipe for shopping
     public int? Servings { get; set; }  // portions to cook this day; scales the shopping quantities
+    public MealKind Kind { get; set; } = MealKind.Cook; // leftovers/eating-out skip the shopping list
+}
+
+/// <summary>A frequently-bought item; learned from shopping additions to power quick-add chips.</summary>
+public class Staple
+{
+    public int Id { get; set; }
+    public required string Name { get; set; }
+    public string? Qty { get; set; }
+    public int Count { get; set; }
+    public DateTime LastUsed { get; set; } = DateTime.UtcNow;
 }
 
 public class AppDb(DbContextOptions<AppDb> options) : DbContext(options)
@@ -58,6 +70,7 @@ public class AppDb(DbContextOptions<AppDb> options) : DbContext(options)
     public DbSet<ShoppingItem> ShoppingItems => Set<ShoppingItem>();
     public DbSet<Meal> Meals => Set<Meal>();
     public DbSet<Recipe> Recipes => Set<Recipe>();
+    public DbSet<Staple> Staples => Set<Staple>();
 
     protected override void OnModelCreating(ModelBuilder b)
     {

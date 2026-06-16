@@ -313,6 +313,19 @@ nav button .badge {
 .stepper span { min-width: 44px; text-align: center; font-weight: 800; font-size: 16px; }
 .portions-field .stepper { margin-top: 2px; }
 
+/* Quick-add staple chips */
+.staples { padding: 0 16px 10px; }
+.chip.staple { color: var(--accent); border-color: var(--line); }
+.chip.staple.added { color: var(--text-dim); opacity: 0.55; }
+
+/* Leftovers / eating-out meal label */
+.meal-day .meal-other {
+  flex: 1; min-width: 0; text-align: left;
+  background: var(--surface); border: 1px dashed var(--line); border-radius: 10px;
+  padding: 11px 13px; font-size: 15px; font-weight: 600; color: var(--text-dim);
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+
 /* Linked meal shown as a tappable button that opens cook mode */
 .meal-day .meal-cook {
   flex: 1; min-width: 0; text-align: left;

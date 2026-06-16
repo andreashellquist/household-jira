@@ -39,6 +39,7 @@
         <input id="shopQty" class="qty" placeholder="Antal" autocomplete="off">
         <button type="submit" aria-label="Lägg till">+</button>
       </form>
+      <div class="chips staples" id="staples"></div>
       <div class="list-wrap" id="shopList"></div>
     </section>
 
@@ -197,7 +198,13 @@
 
 <!-- Pick a recipe for a meal slot -->
 <div class="sheet" id="mealPickSheet">
-  <h2 id="mealPickTitle">Välj recept</h2>
+  <h2 id="mealPickTitle">Planera middag</h2>
+  <div class="seg" id="mealPickKind">
+    <button type="button" data-kind="cook">Laga mat</button>
+    <button type="button" data-kind="leftovers">♻ Rester</button>
+    <button type="button" data-kind="eatingOut">Äter ute</button>
+  </div>
+  <p class="sheet-hint" id="mealPickHint" hidden></p>
   <div class="chips" id="mealPickList"></div>
   <div class="field portions-field" id="mealPickPortions" hidden>
     <label>Portioner</label>

@@ -22,7 +22,7 @@ const DOW = ["sön", "mån", "tis", "ons", "tor", "fre", "lör"];
 const UNITS = ["st", "g", "kg", "dl", "l", "msk", "tsk", "krm", "förp", "klyfta", "näve"];
 
 const state = {
-  members: [], chores: [], shopping: [], meals: [], recipes: [],
+  members: [], chores: [], shopping: [], meals: [], recipes: [], staples: [],
   filter: null, editing: null,
   me: Number(localStorage.getItem("hemma.me")) || null, // who's using this device
   mine: false, // "Mitt" filter on the board
@@ -292,6 +292,35 @@ function renderShopping() {
   const badge = $("shopBadge");
   badge.hidden = open.length === 0;
   badge.textContent = open.length;
+  renderStaples();
+}
+
+// Quick-add chips for frequently-bought items (learned automatically server-side).
+function renderStaples() {
+  const onList = new Set(state.shopping.filter((i) => !i.checked).map((i) => i.name.toLowerCase()));
+  $("staples").innerHTML = state.staples
+    .slice(0, 8)
+    .map((s) => {
+      const added = onList.has(s.name.toLowerCase());
+      return `<button class="chip staple ${added ? "added" : ""}" data-staple="${esc(s.name)}">${added ? "✓" : "+"} ${esc(s.name)}</button>`;
+    })
+    .join("");
+}
+
+async function addShoppingItem(name, qty) {
+  const item = await api("/api/shopping", "POST", { name, qty: qty || null });
+  state.shopping.unshift(item);
+  bumpStaple(name, qty);
+  renderShopping();
+}
+
+// Mirror the server's staple learning locally so chips reorder/appear without a reload.
+function bumpStaple(name, qty) {
+  const key = name.trim().toLowerCase();
+  const existing = state.staples.find((s) => s.name.toLowerCase() === key);
+  if (existing) { existing.count++; if (qty) existing.qty = qty; }
+  else state.staples.push({ name: name.trim(), qty: qty || null, count: 1 });
+  state.staples.sort((a, b) => b.count - a.count);
 }
 
 // ---------- Meals ----------
@@ -306,14 +335,19 @@ function renderMeals() {
   $("mealList").innerHTML = days
     .map(({ iso, d }) => {
       const meal = state.meals.find((m) => m.date === iso && m.slot === "dinner");
-      const linkedToRecipe = meal?.recipeId && state.recipes.some((r) => r.id === meal.recipeId);
-      // Linked days become a tappable button (→ cook mode); free-text days stay an editable input.
-      const field = linkedToRecipe
-        ? `<button class="meal-cook" data-cook-meal="${iso}">${esc(meal.title)}</button>`
-        : `<input data-meal="${iso}" value="${esc(meal?.title ?? "")}" placeholder="Vad blir det till middag?" autocomplete="off">`;
-      const pill = linkedToRecipe && meal?.servings
-        ? `<button class="portions-pill" data-meal-pick="${iso}">${meal.servings} port</button>`
-        : "";
+      const kind = meal?.kind ?? "cook";
+      const linkedToRecipe = kind === "cook" && meal?.recipeId && state.recipes.some((r) => r.id === meal.recipeId);
+      let field, pill = "";
+      if (linkedToRecipe) {
+        // Cooking a recipe → tap opens cook mode; portions pill opens the picker.
+        field = `<button class="meal-cook" data-cook-meal="${iso}">${esc(meal.title)}</button>`;
+        if (meal.servings) pill = `<button class="portions-pill" data-meal-pick="${iso}">${meal.servings} port</button>`;
+      } else if (kind === "leftovers" || kind === "eatingOut") {
+        // No shopping; tap to edit. Muted style.
+        field = `<button class="meal-other" data-meal-pick="${iso}">${esc(meal.title)}</button>`;
+      } else {
+        field = `<input data-meal="${iso}" value="${esc(meal?.title ?? "")}" placeholder="Vad blir det till middag?" autocomplete="off">`;
+      }
       return `
         <div class="meal-day ${iso === todayISO() ? "today" : ""}">
           <div class="day"><span class="dow">${DOW[d.getDay()]}</span><span class="dom">${d.getDate()}</span></div>
@@ -325,11 +359,8 @@ function renderMeals() {
     .join("");
 }
 
-async function saveMeal(iso, title, recipeId = null, servings = null) {
-  const existing = state.meals.find((m) => m.date === iso && m.slot === "dinner");
-  if ((existing?.title ?? "") === title.trim() && (existing?.recipeId ?? null) === recipeId &&
-      (existing?.servings ?? null) === servings) return;
-  const result = await api("/api/meals", "PUT", { date: iso, slot: "dinner", title: title.trim(), recipeId, servings });
+async function saveMeal(iso, title, recipeId = null, servings = null, kind = "cook") {
+  const result = await api("/api/meals", "PUT", { date: iso, slot: "dinner", title: title.trim(), recipeId, servings, kind });
   state.meals = state.meals.filter((m) => !(m.date === iso && m.slot === "dinner"));
   if (result) state.meals.push(result);
   toast("Matplan sparad");
@@ -464,14 +495,17 @@ async function importRecipeFromUrl() {
 }
 
 // ---------- Meal → recipe picker (with portions) ----------
+const KIND_LABELS = { leftovers: "♻ Rester", eatingOut: "Äter ute" };
+
 function openMealPick(iso) {
   const meal = state.meals.find((m) => m.date === iso && m.slot === "dinner");
   const recipe = meal?.recipeId ? state.recipes.find((r) => r.id === meal.recipeId) : null;
   state.mealPick = {
     date: iso,
+    kind: meal?.kind ?? "cook",
     recipeId: meal?.recipeId ?? null,
     servings: meal?.servings ?? recipe?.servings ?? 4,
-    wasLinked: !!meal?.recipeId,
+    wasPlanned: !!meal,
   };
   renderMealPick();
   $("backdrop").classList.add("open");
@@ -480,16 +514,34 @@ function openMealPick(iso) {
 
 function renderMealPick() {
   const p = state.mealPick;
-  $("mealPickList").innerHTML =
-    state.recipes
-      .map((r) => `<button class="chip ${p.recipeId === r.id ? "on" : ""}" data-pick-recipe="${r.id}">${esc(r.name)}</button>`)
-      .join("") ||
-    `<div class="empty">Inga recept ännu — lägg till under Recept 📖</div>`;
-  const hasSelection = p.recipeId != null;
-  $("mealPickPortions").hidden = !hasSelection;
-  $("mealPickActions").hidden = !hasSelection && !p.wasLinked;
+  document.querySelectorAll("#mealPickKind button").forEach((b) => b.classList.toggle("on", b.dataset.kind === p.kind));
+
+  const cooking = p.kind === "cook";
+  $("mealPickList").hidden = !cooking;
+  $("mealPickPortions").hidden = !(cooking && p.recipeId != null);
   $("mealPickServings").textContent = p.servings;
-  $("mealPickUnlink").hidden = !p.wasLinked;
+
+  const hint = $("mealPickHint");
+  hint.hidden = cooking;
+  if (!cooking) hint.textContent = "Läggs inte till på inköpslistan.";
+
+  if (cooking)
+    $("mealPickList").innerHTML =
+      state.recipes
+        .map((r) => `<button class="chip ${p.recipeId === r.id ? "on" : ""}" data-pick-recipe="${r.id}">${esc(r.name)}</button>`)
+        .join("") ||
+      `<div class="empty">Inga recept ännu — lägg till under Recept 📖</div>`;
+
+  // Can save a cook day once a recipe is chosen; leftovers/eating-out can always save.
+  const canSave = cooking ? p.recipeId != null : true;
+  $("mealPickActions").hidden = !canSave && !p.wasPlanned;
+  $("mealPickSave").disabled = !canSave;
+  $("mealPickUnlink").hidden = !p.wasPlanned;
+}
+
+function selectMealKind(kind) {
+  state.mealPick.kind = kind;
+  renderMealPick();
 }
 
 function selectRecipeInPick(recipeId) {
@@ -506,8 +558,12 @@ function adjustPickPortions(delta) {
 
 async function saveMealPick() {
   const p = state.mealPick;
-  const recipe = state.recipes.find((r) => r.id === p.recipeId);
-  if (recipe) await saveMeal(p.date, recipe.name, recipe.id, p.servings);
+  if (p.kind === "cook") {
+    const recipe = state.recipes.find((r) => r.id === p.recipeId);
+    if (recipe) await saveMeal(p.date, recipe.name, recipe.id, p.servings, "cook");
+  } else {
+    await saveMeal(p.date, KIND_LABELS[p.kind], null, null, p.kind);
+  }
   closeSheet();
   renderMeals();
 }
@@ -752,8 +808,16 @@ function switchView(name) {
 }
 
 document.addEventListener("click", async (e) => {
-  const t = e.target.closest("[data-view], [data-cat], [data-mine], [data-pick-me], [data-advance], .card, [data-shop-del], [data-shop], [data-mem-del], [data-pick-cat], [data-pick-pri], [data-pick-mem], #clearChecked, [data-recipe], [data-meal-pick], [data-cook-meal], [data-pick-recipe], [data-portions], [data-cook-portions], .ing-del, .ica-row-del, .step-timer");
+  const t = e.target.closest("[data-view], [data-cat], [data-mine], [data-pick-me], [data-advance], .card, [data-shop-del], [data-shop], [data-mem-del], [data-pick-cat], [data-pick-pri], [data-pick-mem], #clearChecked, [data-recipe], [data-meal-pick], [data-cook-meal], [data-pick-recipe], [data-portions], [data-cook-portions], .ing-del, .ica-row-del, .step-timer, [data-staple], [data-kind]");
   if (!t) return;
+
+  if (t.dataset.staple) {
+    const name = t.dataset.staple;
+    if (state.shopping.some((i) => !i.checked && i.name.toLowerCase() === name.toLowerCase())) return; // already on list
+    const s = state.staples.find((x) => x.name.toLowerCase() === name.toLowerCase());
+    return addShoppingItem(name, s?.qty);
+  }
+  if (t.dataset.kind) return selectMealKind(t.dataset.kind);
 
   if (t.dataset.recipe) return openRecipeSheet(state.recipes.find((r) => r.id === Number(t.dataset.recipe)));
   if (t.dataset.cookMeal) return openCookForMeal(t.dataset.cookMeal);
@@ -856,12 +920,11 @@ $("shopForm").addEventListener("submit", async (e) => {
   e.preventDefault();
   const name = $("shopName").value.trim();
   if (!name) return;
-  const item = await api("/api/shopping", "POST", { name, qty: $("shopQty").value.trim() || null });
-  state.shopping.unshift(item);
+  const qty = $("shopQty").value.trim();
   $("shopName").value = "";
   $("shopQty").value = "";
   $("shopName").focus();
-  renderShopping();
+  await addShoppingItem(name, qty);
 });
 
 $("memberForm").addEventListener("submit", async (e) => {
@@ -890,7 +953,8 @@ $("mealList").addEventListener("keydown", (e) => {
   const data = await api("/api/bootstrap");
   Object.assign(state, {
     members: data.members, chores: data.chores, shopping: data.shopping,
-    meals: data.meals, recipes: data.recipes ?? [], icaConfigured: data.icaConfigured,
+    meals: data.meals, recipes: data.recipes ?? [], staples: data.staples ?? [],
+    icaConfigured: data.icaConfigured,
   });
   if (state.me && !memberById(state.me)) setMe(null); // stale identity from a removed member
   renderMeAvatar();

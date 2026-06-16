@@ -21,8 +21,9 @@ public static class IcaListBuilder
         var today = DateOnly.FromDateTime(DateTime.Today);
         var weekEnd = today.AddDays(7);
 
+        // Only meals you're actually cooking contribute groceries — leftovers/eating-out are skipped.
         var plannedMeals = await db.Meals
-            .Where(m => m.RecipeId != null && m.Date >= today && m.Date < weekEnd)
+            .Where(m => m.RecipeId != null && m.Kind == MealKind.Cook && m.Date >= today && m.Date < weekEnd)
             .Select(m => new { RecipeId = m.RecipeId!.Value, m.Servings })
             .ToListAsync();
 
