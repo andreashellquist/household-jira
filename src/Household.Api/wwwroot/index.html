@@ -213,11 +213,18 @@
   </div>
 </div>
 
-<!-- ICA push result -->
+<!-- ICA: review & edit the list before sending -->
 <div class="sheet" id="icaSheet">
-  <h2 id="icaTitle">Inköpslista</h2>
-  <div id="icaStatus" class="ica-status"></div>
+  <h2>Inköpslista till ICA</h2>
+  <div class="field">
+    <input id="icaListTitle" placeholder="Listans namn" autocomplete="off">
+  </div>
   <div id="icaRows" class="ica-rows"></div>
+  <button type="button" class="add-ingredient" id="icaAddRow">+ Lägg till rad</button>
+  <div id="icaStatus" class="ica-status" hidden></div>
+  <div class="actions">
+    <button class="btn-primary" id="icaSend">Skicka till ICA</button>
+  </div>
 </div>
 
 <!-- Who am I -->

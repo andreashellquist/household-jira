@@ -1,5 +1,7 @@
+using System.Globalization;
 using System.Text;
 using System.Text.Json;
+using Microsoft.EntityFrameworkCore;
 
 namespace Household.Api;
 
@@ -7,6 +9,49 @@ public class IcaOptions
 {
     public string Personnummer { get; set; } = "";
     public string Pin { get; set; } = "";
+}
+
+public record PushRequest(string? Title, List<string> Rows);
+
+/// <summary>Assembles the upcoming week's shopping list (scaled recipe ingredients + open items).</summary>
+public static class IcaListBuilder
+{
+    public static async Task<(string Title, List<string> Rows)> BuildWeek(AppDb db)
+    {
+        var today = DateOnly.FromDateTime(DateTime.Today);
+        var weekEnd = today.AddDays(7);
+
+        var plannedMeals = await db.Meals
+            .Where(m => m.RecipeId != null && m.Date >= today && m.Date < weekEnd)
+            .Select(m => new { RecipeId = m.RecipeId!.Value, m.Servings })
+            .ToListAsync();
+
+        // Each planned meal contributes its recipe's ingredients, scaled to the portions being cooked.
+        var ingredients = new List<RecipeIngredient>();
+        if (plannedMeals.Count > 0)
+        {
+            var recipeIds = plannedMeals.Select(m => m.RecipeId).Distinct().ToList();
+            var byId = await db.Recipes.Include(r => r.Ingredients)
+                .Where(r => recipeIds.Contains(r.Id)).ToDictionaryAsync(r => r.Id);
+            foreach (var meal in plannedMeals)
+            {
+                if (!byId.TryGetValue(meal.RecipeId, out var r)) continue;
+                var scale = meal.Servings is int s && s > 0 && r.Servings > 0 ? (double)s / r.Servings : 1.0;
+                ingredients.AddRange(r.Ingredients.Select(i =>
+                    new RecipeIngredient { Name = i.Name, Amount = i.Amount * scale, Unit = i.Unit }));
+            }
+        }
+
+        var rows = ShoppingAggregator.Aggregate(ingredients);
+
+        // Append the open (unchecked) manual shopping items.
+        var openItems = await db.ShoppingItems.Where(i => !i.Checked)
+            .OrderByDescending(i => i.CreatedAt).ToListAsync();
+        rows.AddRange(openItems.Select(i => string.IsNullOrWhiteSpace(i.Qty) ? i.Name : $"{i.Qty} {i.Name}"));
+
+        var title = $"Hemma v.{ISOWeek.GetWeekOfYear(DateTime.Today)}";
+        return (title, rows);
+    }
 }
 
 /// <summary>

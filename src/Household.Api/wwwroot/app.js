@@ -561,7 +561,65 @@ function openCookForMeal(iso) {
 
 function closeCook() {
   $("cookMode").classList.remove("open");
+  clearCookTimers();
   releaseWakeLock();
+}
+
+// ---- Per-step countdown timers ----
+const cookTimers = {};
+function clearCookTimers() {
+  for (const id in cookTimers) { clearInterval(cookTimers[id]); delete cookTimers[id]; }
+}
+const fmtClock = (s) => `${Math.floor(s / 60)}:${String(s % 60).padStart(2, "0")}`;
+const timerLabel = (s) => (s % 60 === 0 ? `${s / 60} min` : s < 60 ? `${s} s` : fmtClock(s));
+
+// Find a duration mentioned in a step ("koka i 10 minuter", "stek 3 min", "vila 30 sek").
+function parseStepDuration(text) {
+  let m = text.match(/(\d+)\s*(?:[–-]\s*\d+\s*)?min(?:ut(?:er)?)?\b/i);
+  if (m) return Number(m[1]) * 60;
+  m = text.match(/(\d+)\s*(?:[–-]\s*\d+\s*)?(?:timm(?:e|ar)?|tim)\b/i);
+  if (m) return Number(m[1]) * 3600;
+  m = text.match(/(\d+)\s*(?:[–-]\s*\d+\s*)?sek(?:und(?:er)?)?\b/i);
+  if (m) return Number(m[1]);
+  return null;
+}
+
+function beep() {
+  try {
+    const ctx = new (window.AudioContext || window.webkitAudioContext)();
+    const osc = ctx.createOscillator();
+    const gain = ctx.createGain();
+    osc.connect(gain); gain.connect(ctx.destination);
+    osc.type = "sine"; osc.frequency.value = 880;
+    gain.gain.setValueAtTime(0.0001, ctx.currentTime);
+    gain.gain.exponentialRampToValueAtTime(0.4, ctx.currentTime + 0.05);
+    gain.gain.exponentialRampToValueAtTime(0.0001, ctx.currentTime + 1.4);
+    osc.start(); osc.stop(ctx.currentTime + 1.4);
+  } catch { /* audio unavailable */ }
+}
+
+function toggleStepTimer(btn) {
+  const id = btn.dataset.timer;
+  const total = Number(btn.dataset.secs);
+  if (cookTimers[id]) { // running → cancel
+    clearInterval(cookTimers[id]); delete cookTimers[id];
+    btn.classList.remove("running"); btn.textContent = `⏱ ${timerLabel(total)}`;
+    return;
+  }
+  let left = total;
+  btn.classList.remove("done"); btn.classList.add("running");
+  btn.textContent = `⏸ ${fmtClock(left)}`;
+  cookTimers[id] = setInterval(() => {
+    left--;
+    if (left <= 0) {
+      clearInterval(cookTimers[id]); delete cookTimers[id];
+      btn.classList.remove("running"); btn.classList.add("done"); btn.textContent = "✓ Klart!";
+      beep(); navigator.vibrate?.([300, 150, 300]); toast("⏱ Timer klar!");
+      setTimeout(() => { btn.classList.remove("done"); btn.textContent = `⏱ ${timerLabel(total)}`; }, 10000);
+    } else {
+      btn.textContent = `⏸ ${fmtClock(left)}`;
+    }
+  }, 1000);
 }
 
 function adjustCookPortions(delta) {
@@ -570,6 +628,7 @@ function adjustCookPortions(delta) {
 }
 
 function renderCook() {
+  clearCookTimers(); // DOM is about to be rebuilt
   const { recipe, servings } = state.cook;
   const scale = recipe.servings > 0 ? servings / recipe.servings : 1;
   $("cookTitle").textContent = recipe.name;
@@ -586,7 +645,11 @@ function renderCook() {
 
   const steps = (recipe.instructions ?? "")
     .split("\n").map((s) => s.trim()).filter(Boolean)
-    .map((s) => `<li>${esc(s)}</li>`).join("");
+    .map((s, idx) => {
+      const secs = parseStepDuration(s);
+      const timer = secs ? `<button class="step-timer" data-timer="t${idx}" data-secs="${secs}">⏱ ${timerLabel(secs)}</button>` : "";
+      return `<li><div class="step-main"><div class="step-text">${esc(s)}</div>${timer}</div></li>`;
+    }).join("");
 
   $("cookBody").innerHTML = `
     ${recipe.imageUrl ? `<img class="cook-image" src="${esc(recipe.imageUrl)}" alt="">` : ""}
@@ -598,24 +661,59 @@ function renderCook() {
     <p class="cook-wake">${wakeLock ? "🔆 Skärmen hålls tänd medan du lagar." : ""}</p>`;
 }
 
-// ---------- ICA push ----------
-async function pushToIca() {
-  toast("Skickar…");
-  const res = await api("/api/ica/push", "POST");
-  $("icaTitle").textContent = res.title;
+// ---------- ICA: review, edit, then push ----------
+const icaRowHtml = (value = "") => `
+  <div class="ica-row">
+    <input class="ica-row-input" value="${esc(value)}" autocomplete="off">
+    <button type="button" class="ica-row-del" aria-label="Ta bort">×</button>
+  </div>`;
+
+async function openIcaReview() {
+  const res = await api("/api/ica/preview");
+  $("icaListTitle").value = res.title;
+  $("icaRows").innerHTML = res.rows.length
+    ? res.rows.map((r) => icaRowHtml(r)).join("")
+    : `<div class="empty">Tom lista — planera middagar eller fyll inköpslistan.</div>`;
   const status = $("icaStatus");
+  if (!res.configured) {
+    status.hidden = false;
+    status.className = "ica-status warn";
+    status.textContent = "ICA-inloggning saknas — lägg till i appsettings.Local.json för att kunna skicka.";
+  } else {
+    status.hidden = true;
+  }
+  $("backdrop").classList.add("open");
+  $("icaSheet").classList.add("open");
+}
+
+function collectIcaRows() {
+  return [...$("icaRows").querySelectorAll(".ica-row-input")].map((i) => i.value.trim()).filter(Boolean);
+}
+
+async function sendIcaList() {
+  const rows = collectIcaRows();
+  const status = $("icaStatus");
+  if (rows.length === 0) {
+    status.hidden = false;
+    status.className = "ica-status warn";
+    status.textContent = "Listan är tom.";
+    return;
+  }
+  const btn = $("icaSend");
+  btn.disabled = true;
+  btn.textContent = "Skickar…";
+  const res = await api("/api/ica/push", "POST", { title: $("icaListTitle").value.trim(), rows });
+  btn.disabled = false;
+  btn.textContent = "Skicka till ICA";
+  status.hidden = false;
   if (res.sent) {
     status.className = "ica-status ok";
     status.textContent = `✓ Skickat till ICA — ${res.count} varor i "${res.title}"`;
+    toast("Skickat till ICA ✓");
   } else {
     status.className = "ica-status warn";
-    status.textContent = res.count === 0 ? "Inget att skicka — planera middagar eller fyll inköpslistan först." : `Kunde inte skicka: ${res.error}`;
+    status.textContent = `Kunde inte skicka: ${res.error}`;
   }
-  $("icaRows").innerHTML =
-    res.rows.map((r) => `<div class="ica-line">${esc(r)}</div>`).join("") ||
-    `<div class="empty">Tom lista</div>`;
-  $("backdrop").classList.add("open");
-  $("icaSheet").classList.add("open");
 }
 
 // ---------- Family ----------
@@ -654,7 +752,7 @@ function switchView(name) {
 }
 
 document.addEventListener("click", async (e) => {
-  const t = e.target.closest("[data-view], [data-cat], [data-mine], [data-pick-me], [data-advance], .card, [data-shop-del], [data-shop], [data-mem-del], [data-pick-cat], [data-pick-pri], [data-pick-mem], #clearChecked, [data-recipe], [data-meal-pick], [data-cook-meal], [data-pick-recipe], [data-portions], [data-cook-portions], .ing-del");
+  const t = e.target.closest("[data-view], [data-cat], [data-mine], [data-pick-me], [data-advance], .card, [data-shop-del], [data-shop], [data-mem-del], [data-pick-cat], [data-pick-pri], [data-pick-mem], #clearChecked, [data-recipe], [data-meal-pick], [data-cook-meal], [data-pick-recipe], [data-portions], [data-cook-portions], .ing-del, .ica-row-del, .step-timer");
   if (!t) return;
 
   if (t.dataset.recipe) return openRecipeSheet(state.recipes.find((r) => r.id === Number(t.dataset.recipe)));
@@ -663,7 +761,9 @@ document.addEventListener("click", async (e) => {
   if (t.dataset.pickRecipe !== undefined) return selectRecipeInPick(Number(t.dataset.pickRecipe));
   if (t.dataset.portions) return adjustPickPortions(Number(t.dataset.portions));
   if (t.dataset.cookPortions) return adjustCookPortions(Number(t.dataset.cookPortions));
+  if (t.classList.contains("step-timer")) return toggleStepTimer(t);
   if (t.classList.contains("ing-del")) { e.preventDefault(); return t.closest(".ing-row").remove(); }
+  if (t.classList.contains("ica-row-del")) { e.preventDefault(); return t.closest(".ica-row").remove(); }
 
   if (t.dataset.view) return switchView(t.dataset.view);
   if (t.dataset.cat !== undefined) {
@@ -745,7 +845,12 @@ $("cookClose").addEventListener("click", closeCook);
 $("rCook").addEventListener("click", () => {
   if (state.editingRecipe) { closeSheet(); openCook(state.editingRecipe, state.editingRecipe.servings); }
 });
-$("icaPush").addEventListener("click", pushToIca);
+$("icaPush").addEventListener("click", openIcaReview);
+$("icaSend").addEventListener("click", sendIcaList);
+$("icaAddRow").addEventListener("click", () => {
+  $("icaRows").insertAdjacentHTML("beforeend", icaRowHtml());
+  $("icaRows").lastElementChild.querySelector(".ica-row-input").focus();
+});
 
 $("shopForm").addEventListener("submit", async (e) => {
   e.preventDefault();

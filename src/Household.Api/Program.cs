@@ -227,42 +227,24 @@ app.MapPost("/api/recipes/import", async (ImportRequest req, IHttpClientFactory 
     }
 });
 
-// ---- ICA: push the upcoming week's ingredients + open shopping items as one self-scan list ----
-app.MapPost("/api/ica/push", async (AppDb db, IcaService ica) =>
+// ---- ICA self-scan list ----
+// Preview the assembled week (scaled recipe ingredients + open shopping items) for review/edit.
+app.MapGet("/api/ica/preview", async (AppDb db, IcaService ica) =>
 {
-    var today = DateOnly.FromDateTime(DateTime.Today);
-    var weekEnd = today.AddDays(7);
+    var (title, rows) = await IcaListBuilder.BuildWeek(db);
+    return Results.Ok(new { title, rows, configured = ica.IsConfigured });
+});
 
-    var plannedMeals = await db.Meals
-        .Where(m => m.RecipeId != null && m.Date >= today && m.Date < weekEnd)
-        .Select(m => new { RecipeId = m.RecipeId!.Value, m.Servings })
-        .ToListAsync();
-
-    // Each planned meal contributes its recipe's ingredients, scaled to the portions being cooked.
-    var ingredients = new List<RecipeIngredient>();
-    if (plannedMeals.Count > 0)
-    {
-        var recipeIds = plannedMeals.Select(m => m.RecipeId).Distinct().ToList();
-        var byId = await db.Recipes.Include(r => r.Ingredients)
-            .Where(r => recipeIds.Contains(r.Id)).ToDictionaryAsync(r => r.Id);
-        foreach (var meal in plannedMeals)
-        {
-            if (!byId.TryGetValue(meal.RecipeId, out var r)) continue;
-            var scale = meal.Servings is int s && s > 0 && r.Servings > 0 ? (double)s / r.Servings : 1.0;
-            ingredients.AddRange(r.Ingredients.Select(i =>
-                new RecipeIngredient { Name = i.Name, Amount = i.Amount * scale, Unit = i.Unit }));
-        }
-    }
-
-    var rows = ShoppingAggregator.Aggregate(ingredients);
-
-    // Append the open (unchecked) manual shopping items.
-    var openItems = await db.ShoppingItems.Where(i => !i.Checked).OrderByDescending(i => i.CreatedAt).ToListAsync();
-    rows.AddRange(openItems.Select(i => string.IsNullOrWhiteSpace(i.Qty) ? i.Name : $"{i.Qty} {i.Name}"));
-
-    var title = $"Hemma v.{System.Globalization.ISOWeek.GetWeekOfYear(DateTime.Today)}";
+// Push the (possibly edited) list to ICA.
+app.MapPost("/api/ica/push", async (IcaService ica, PushRequest req) =>
+{
+    var title = string.IsNullOrWhiteSpace(req.Title)
+        ? $"Hemma v.{System.Globalization.ISOWeek.GetWeekOfYear(DateTime.Today)}"
+        : req.Title.Trim();
+    var rows = (req.Rows ?? new List<string>())
+        .Select(r => r.Trim()).Where(r => r.Length > 0).ToList();
     var (sent, error) = await ica.PushList(title, rows);
-    return Results.Ok(new { sent, error, title, rows, count = rows.Count });
+    return Results.Ok(new { sent, error, title, count = rows.Count });
 });
 
 app.Run();
