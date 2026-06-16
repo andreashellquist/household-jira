@@ -190,6 +190,7 @@
   </div>
   <div class="actions">
     <button class="btn-danger" id="rDelete" hidden>Ta bort</button>
+    <button class="btn-cook" id="rCook" hidden>Laga</button>
     <button class="btn-primary" id="rSave">Spara</button>
   </div>
 </div>
@@ -224,6 +225,20 @@
   <h2>Vem är du?</h2>
   <p class="sheet-hint">Välj dig själv så kan du snabbt se dina uppgifter.</p>
   <div class="chips" id="mePicker"></div>
+</div>
+
+<!-- Cook mode (full screen, scaled, keeps screen awake) -->
+<div class="cook" id="cookMode">
+  <div class="cook-head">
+    <button class="cook-close" id="cookClose" aria-label="Stäng">←</button>
+    <div class="cook-title" id="cookTitle"></div>
+    <div class="stepper cook-stepper">
+      <button type="button" data-cook-portions="-1" aria-label="Färre">−</button>
+      <span id="cookServings">4</span>
+      <button type="button" data-cook-portions="1" aria-label="Fler">+</button>
+    </div>
+  </div>
+  <div class="cook-body" id="cookBody"></div>
 </div>
 
 <div class="toast" id="toast"></div>

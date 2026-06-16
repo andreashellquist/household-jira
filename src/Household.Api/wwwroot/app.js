@@ -306,14 +306,18 @@ function renderMeals() {
   $("mealList").innerHTML = days
     .map(({ iso, d }) => {
       const meal = state.meals.find((m) => m.date === iso && m.slot === "dinner");
-      const linked = meal?.recipeId ? "linked" : "";
-      const pill = meal?.recipeId && meal?.servings
+      const linkedToRecipe = meal?.recipeId && state.recipes.some((r) => r.id === meal.recipeId);
+      // Linked days become a tappable button (→ cook mode); free-text days stay an editable input.
+      const field = linkedToRecipe
+        ? `<button class="meal-cook" data-cook-meal="${iso}">${esc(meal.title)}</button>`
+        : `<input data-meal="${iso}" value="${esc(meal?.title ?? "")}" placeholder="Vad blir det till middag?" autocomplete="off">`;
+      const pill = linkedToRecipe && meal?.servings
         ? `<button class="portions-pill" data-meal-pick="${iso}">${meal.servings} port</button>`
         : "";
       return `
         <div class="meal-day ${iso === todayISO() ? "today" : ""}">
           <div class="day"><span class="dow">${DOW[d.getDay()]}</span><span class="dom">${d.getDate()}</span></div>
-          <input class="${linked}" data-meal="${iso}" value="${esc(meal?.title ?? "")}" placeholder="Vad blir det till middag?" autocomplete="off">
+          ${field}
           ${pill}
           <button class="recipe-pick" data-meal-pick="${iso}" aria-label="Välj recept">📖</button>
         </div>`;
@@ -385,6 +389,7 @@ function openRecipeSheet(recipe) {
   const ings = recipe?.ingredients?.length ? recipe.ingredients : [undefined];
   $("rIngredients").innerHTML = ings.map((i) => ingredientRowHtml(i)).join("");
   $("rDelete").hidden = !recipe;
+  $("rCook").hidden = !recipe;
   $("backdrop").classList.add("open");
   $("recipeSheet").classList.add("open");
   if (!recipe) setTimeout(() => $("rName").focus(), 100);
@@ -513,6 +518,86 @@ async function unlinkMeal() {
   renderMeals();
 }
 
+// ---------- Cook mode (full screen, scaled, screen stays awake) ----------
+let wakeLock = null;
+
+async function acquireWakeLock() {
+  try {
+    if ("wakeLock" in navigator) {
+      wakeLock = await navigator.wakeLock.request("screen");
+      const note = document.querySelector(".cook-wake");
+      if (note) note.textContent = "🔆 Skärmen hålls tänd medan du lagar.";
+    }
+  } catch { /* denied or unsupported — cook mode still works, screen just may sleep */ }
+}
+function releaseWakeLock() {
+  try { wakeLock?.release(); } catch { /* ignore */ }
+  wakeLock = null;
+}
+// Wake locks drop when the tab is hidden; re-acquire when we come back while cooking.
+document.addEventListener("visibilitychange", () => {
+  if (document.visibilityState === "visible" && $("cookMode").classList.contains("open") && !wakeLock)
+    acquireWakeLock();
+});
+
+function fmtAmount(n) {
+  const r = Math.round(n * 100) / 100;
+  return (Number.isInteger(r) ? String(r) : r.toFixed(2).replace(/0+$/, "").replace(/\.$/, "")).replace(".", ",");
+}
+
+function openCook(recipe, servings) {
+  if (!recipe) return;
+  state.cook = { recipe, servings: servings || recipe.servings || 1 };
+  renderCook();
+  $("cookMode").classList.add("open");
+  acquireWakeLock();
+}
+
+function openCookForMeal(iso) {
+  const meal = state.meals.find((m) => m.date === iso && m.slot === "dinner");
+  const recipe = meal && state.recipes.find((r) => r.id === meal.recipeId);
+  openCook(recipe, meal?.servings ?? recipe?.servings);
+}
+
+function closeCook() {
+  $("cookMode").classList.remove("open");
+  releaseWakeLock();
+}
+
+function adjustCookPortions(delta) {
+  state.cook.servings = Math.max(1, state.cook.servings + delta);
+  renderCook();
+}
+
+function renderCook() {
+  const { recipe, servings } = state.cook;
+  const scale = recipe.servings > 0 ? servings / recipe.servings : 1;
+  $("cookTitle").textContent = recipe.name;
+  $("cookServings").textContent = servings;
+
+  const ings = recipe.ingredients
+    .map((i) => {
+      const amt = i.amount * scale;
+      if (!amt) return `<li>${esc(i.name)}</li>`;
+      const unit = i.unit === "st" ? "" : ` ${esc(i.unit)}`;
+      return `<li><strong>${fmtAmount(amt)}${unit}</strong> ${esc(i.name)}</li>`;
+    })
+    .join("");
+
+  const steps = (recipe.instructions ?? "")
+    .split("\n").map((s) => s.trim()).filter(Boolean)
+    .map((s) => `<li>${esc(s)}</li>`).join("");
+
+  $("cookBody").innerHTML = `
+    ${recipe.imageUrl ? `<img class="cook-image" src="${esc(recipe.imageUrl)}" alt="">` : ""}
+    <div class="cook-section-title">Ingredienser</div>
+    <ul class="cook-ings">${ings || `<li class="empty">Inga ingredienser</li>`}</ul>
+    ${recipe.preparations ? `<div class="cook-section-title">Förberedelser</div><p>${esc(recipe.preparations)}</p>` : ""}
+    <div class="cook-section-title">Gör så här</div>
+    ${steps ? `<ol class="cook-steps">${steps}</ol>` : `<p class="empty">Inga instruktioner</p>`}
+    <p class="cook-wake">${wakeLock ? "🔆 Skärmen hålls tänd medan du lagar." : ""}</p>`;
+}
+
 // ---------- ICA push ----------
 async function pushToIca() {
   toast("Skickar…");
@@ -569,13 +654,15 @@ function switchView(name) {
 }
 
 document.addEventListener("click", async (e) => {
-  const t = e.target.closest("[data-view], [data-cat], [data-mine], [data-pick-me], [data-advance], .card, [data-shop-del], [data-shop], [data-mem-del], [data-pick-cat], [data-pick-pri], [data-pick-mem], #clearChecked, [data-recipe], [data-meal-pick], [data-pick-recipe], [data-portions], .ing-del");
+  const t = e.target.closest("[data-view], [data-cat], [data-mine], [data-pick-me], [data-advance], .card, [data-shop-del], [data-shop], [data-mem-del], [data-pick-cat], [data-pick-pri], [data-pick-mem], #clearChecked, [data-recipe], [data-meal-pick], [data-cook-meal], [data-pick-recipe], [data-portions], [data-cook-portions], .ing-del");
   if (!t) return;
 
   if (t.dataset.recipe) return openRecipeSheet(state.recipes.find((r) => r.id === Number(t.dataset.recipe)));
+  if (t.dataset.cookMeal) return openCookForMeal(t.dataset.cookMeal);
   if (t.dataset.mealPick) return openMealPick(t.dataset.mealPick);
   if (t.dataset.pickRecipe !== undefined) return selectRecipeInPick(Number(t.dataset.pickRecipe));
   if (t.dataset.portions) return adjustPickPortions(Number(t.dataset.portions));
+  if (t.dataset.cookPortions) return adjustCookPortions(Number(t.dataset.cookPortions));
   if (t.classList.contains("ing-del")) { e.preventDefault(); return t.closest(".ing-row").remove(); }
 
   if (t.dataset.view) return switchView(t.dataset.view);
@@ -654,6 +741,10 @@ $("rDelete").addEventListener("click", deleteRecipe);
 $("rImport").addEventListener("click", importRecipeFromUrl);
 $("mealPickSave").addEventListener("click", saveMealPick);
 $("mealPickUnlink").addEventListener("click", unlinkMeal);
+$("cookClose").addEventListener("click", closeCook);
+$("rCook").addEventListener("click", () => {
+  if (state.editingRecipe) { closeSheet(); openCook(state.editingRecipe, state.editingRecipe.servings); }
+});
 $("icaPush").addEventListener("click", pushToIca);
 
 $("shopForm").addEventListener("submit", async (e) => {
