@@ -7,3 +7,4 @@ obj/
 *.db-shm
 *.db-wal
 appsettings.Local.json
+vapid.json

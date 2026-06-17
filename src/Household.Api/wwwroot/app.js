@@ -792,6 +792,79 @@ function renderFamily() {
           </div>`;
       })
       .join("") || `<div class="empty">Lägg till er i familjen så kan ni tilldela uppgifter 👆</div>`;
+  renderPushUi();
+}
+
+// ---------- Push notifications ----------
+const pushSupported = () =>
+  "serviceWorker" in navigator && "PushManager" in window && "Notification" in window;
+
+function urlBase64ToUint8Array(base64) {
+  const padding = "=".repeat((4 - (base64.length % 4)) % 4);
+  const normalized = (base64 + padding).replace(/-/g, "+").replace(/_/g, "/");
+  const raw = atob(normalized);
+  return Uint8Array.from([...raw].map((c) => c.charCodeAt(0)));
+}
+
+async function initPush() {
+  if ("serviceWorker" in navigator) {
+    try { await navigator.serviceWorker.register("/sw.js"); } catch { /* SW needs https/localhost */ }
+  }
+  renderPushUi();
+}
+
+async function renderPushUi() {
+  const card = $("pushCard");
+  if (!pushSupported()) {
+    card.innerHTML = `<div class="push-head">🔔 Påminnelser</div>
+      <div class="push-sub">Stöds inte här. Lägg appen på hemskärmen för aviseringar.</div>`;
+    return;
+  }
+  let subscribed = false;
+  try {
+    const reg = await navigator.serviceWorker.getRegistration();
+    subscribed = !!(reg && (await reg.pushManager.getSubscription()));
+  } catch { /* ignore */ }
+
+  if (Notification.permission === "denied") {
+    card.innerHTML = `<div class="push-head">🔔 Påminnelser</div>
+      <div class="push-sub">Aviseringar är blockerade i webbläsarens inställningar.</div>`;
+  } else if (subscribed) {
+    card.innerHTML = `<div class="push-head">🔔 Påminnelser på</div>
+      <div class="push-sub">En notis varje morgon om sysslor som ska göras.</div>
+      <button class="push-btn" data-push="test">Skicka testnotis</button>`;
+  } else {
+    card.innerHTML = `<div class="push-head">🔔 Påminnelser</div>
+      <div class="push-sub">Få en notis när hushållssysslor ska göras.</div>
+      <button class="push-btn primary" data-push="enable">Aktivera</button>`;
+  }
+}
+
+async function enablePush() {
+  try {
+    const { publicKey, enabled } = await api("/api/push/key");
+    if (!enabled || !publicKey) return toast("Push är inte konfigurerad på servern");
+    const perm = await Notification.requestPermission();
+    if (perm !== "granted") return toast("Aviseringar nekades");
+    const reg = await navigator.serviceWorker.ready;
+    const sub = await reg.pushManager.subscribe({
+      userVisibleOnly: true,
+      applicationServerKey: urlBase64ToUint8Array(publicKey),
+    });
+    const j = sub.toJSON();
+    await api("/api/push/subscribe", "POST", {
+      endpoint: j.endpoint, p256dh: j.keys.p256dh, auth: j.keys.auth, memberId: state.me,
+    });
+    toast("Påminnelser aktiverade 🔔");
+    renderPushUi();
+  } catch (e) {
+    toast("Kunde inte aktivera påminnelser");
+  }
+}
+
+async function testPush() {
+  const res = await api("/api/push/test", "POST", { memberId: state.me });
+  toast(res.sent ? `Skickade testnotis (${res.sent})` : "Ingen prenumeration att skicka till");
 }
 
 // ---------- Wiring ----------
@@ -808,8 +881,11 @@ function switchView(name) {
 }
 
 document.addEventListener("click", async (e) => {
-  const t = e.target.closest("[data-view], [data-cat], [data-mine], [data-pick-me], [data-advance], .card, [data-shop-del], [data-shop], [data-mem-del], [data-pick-cat], [data-pick-pri], [data-pick-mem], #clearChecked, [data-recipe], [data-meal-pick], [data-cook-meal], [data-pick-recipe], [data-portions], [data-cook-portions], .ing-del, .ica-row-del, .step-timer, [data-staple], [data-kind]");
+  const t = e.target.closest("[data-view], [data-cat], [data-mine], [data-pick-me], [data-advance], .card, [data-shop-del], [data-shop], [data-mem-del], [data-pick-cat], [data-pick-pri], [data-pick-mem], #clearChecked, [data-recipe], [data-meal-pick], [data-cook-meal], [data-pick-recipe], [data-portions], [data-cook-portions], .ing-del, .ica-row-del, .step-timer, [data-staple], [data-kind], [data-push]");
   if (!t) return;
+
+  if (t.dataset.push === "enable") return enablePush();
+  if (t.dataset.push === "test") return testPush();
 
   if (t.dataset.staple) {
     const name = t.dataset.staple;
@@ -963,4 +1039,5 @@ $("mealList").addEventListener("keydown", (e) => {
   renderMeals();
   renderRecipes();
   renderFamily();
+  initPush();
 })();

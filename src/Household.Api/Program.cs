@@ -12,6 +12,8 @@ builder.Services.AddDbContext<AppDb>(o =>
 
 builder.Services.AddHttpClient();
 builder.Services.AddScoped<IcaService>();
+builder.Services.AddSingleton<PushService>();
+builder.Services.AddHostedService<DueChoreNotifier>();
 
 builder.Services.ConfigureHttpJsonOptions(o =>
     o.SerializerOptions.Converters.Add(new JsonStringEnumConverter(System.Text.Json.JsonNamingPolicy.CamelCase)));
@@ -259,6 +261,42 @@ app.MapPost("/api/ica/push", async (IcaService ica, PushRequest req) =>
         .Select(r => r.Trim()).Where(r => r.Length > 0).ToList();
     var (sent, error) = await ica.PushList(title, rows);
     return Results.Ok(new { sent, error, title, count = rows.Count });
+});
+
+// ---- Push notifications ----
+app.MapGet("/api/push/key", (PushService push) =>
+    Results.Ok(new { publicKey = push.PublicKey, enabled = push.Enabled }));
+
+app.MapPost("/api/push/subscribe", async (AppDb db, SubscribeRequest req) =>
+{
+    var existing = await db.PushSubs.FirstOrDefaultAsync(s => s.Endpoint == req.Endpoint);
+    if (existing is null)
+        db.PushSubs.Add(new PushSub { Endpoint = req.Endpoint, P256dh = req.P256dh, Auth = req.Auth, MemberId = req.MemberId });
+    else
+    {
+        existing.P256dh = req.P256dh;
+        existing.Auth = req.Auth;
+        existing.MemberId = req.MemberId;
+        existing.LastNotified = null;
+    }
+    await db.SaveChangesAsync();
+    return Results.NoContent();
+});
+
+app.MapPost("/api/push/test", async (AppDb db, PushService push, TestRequest req) =>
+{
+    var subs = req.MemberId is int mid
+        ? await db.PushSubs.Where(s => s.MemberId == mid).ToListAsync()
+        : await db.PushSubs.ToListAsync();
+    var sent = 0;
+    foreach (var s in subs)
+    {
+        var r = await push.Send(s, new { title = "Hemma", body = "Påminnelser fungerar! 🔔", url = "/" });
+        if (r == PushResult.Gone) db.PushSubs.Remove(s);
+        else if (r == PushResult.Ok) sent++;
+    }
+    await db.SaveChangesAsync();
+    return Results.Ok(new { sent, enabled = push.Enabled });
 });
 
 app.Run();

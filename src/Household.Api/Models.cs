@@ -71,6 +71,7 @@ public class AppDb(DbContextOptions<AppDb> options) : DbContext(options)
     public DbSet<Meal> Meals => Set<Meal>();
     public DbSet<Recipe> Recipes => Set<Recipe>();
     public DbSet<Staple> Staples => Set<Staple>();
+    public DbSet<PushSub> PushSubs => Set<PushSub>();
 
     protected override void OnModelCreating(ModelBuilder b)
     {
