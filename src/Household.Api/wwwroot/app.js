@@ -116,6 +116,7 @@ function cardHtml(chore) {
     tags.push(`<span class="tag ${due.overdue && chore.status !== "done" ? "overdue" : ""}">📅 ${due.text}</span>`);
   }
   if (chore.recurDays) tags.push(`<span class="tag">↻</span>`);
+  if (chore.remindDaysBefore) tags.push(`<span class="tag">🔔 ${chore.remindDaysBefore}d</span>`);
   tags.push(`<span class="tag" style="color:${cat.color}">${cat.label}</span>`);
   const next = chore.status === "todo" ? "doing" : chore.status === "doing" ? "done" : null;
   return `
@@ -175,10 +176,12 @@ function openSheet(chore) {
   $("fDue").value = chore?.dueDate ?? "";
   $("fRecur").value = chore?.recurDays ?? "";
   $("fRotate").checked = chore?.rotate ?? false;
+  $("fRemind").value = chore?.remindDaysBefore ?? "";
   $("fNotes").value = chore?.notes ?? "";
   $("fDelete").hidden = !chore;
   renderSheetPickers();
   updateRotateVisibility();
+  updateRemindVisibility();
   $("backdrop").classList.add("open");
   $("choreSheet").classList.add("open");
   if (!chore) setTimeout(() => $("fTitle").focus(), 100);
@@ -189,6 +192,11 @@ function updateRotateVisibility() {
   const show = $("fRecur").value !== "" && state.members.length >= 2;
   $("fRotateField").hidden = !show;
   if (!show) $("fRotate").checked = false;
+}
+
+// Reminder lead time only matters when there's a due date to lead.
+function updateRemindVisibility() {
+  $("fRemindField").hidden = !$("fDue").value;
 }
 
 function closeSheet() {
@@ -228,6 +236,7 @@ async function saveChore() {
     dueDate: $("fDue").value || null,
     recurDays: $("fRecur").value ? Number($("fRecur").value) : null,
     rotate: $("fRecur").value !== "" && $("fRotate").checked,
+    remindDaysBefore: $("fDue").value && $("fRemind").value ? Number($("fRemind").value) : null,
   };
   if (state.editing) {
     const updated = await api(`/api/chores/${state.editing.id}`, "PUT", { ...payload, status: state.editing.status });
@@ -969,6 +978,7 @@ $("fSave").addEventListener("click", saveChore);
 $("fDelete").addEventListener("click", deleteChore);
 $("meAvatar").addEventListener("click", openMeSheet);
 $("fRecur").addEventListener("change", updateRotateVisibility);
+$("fDue").addEventListener("change", updateRemindVisibility);
 
 $("recipeAdd").addEventListener("click", () => openRecipeSheet(null));
 $("recipeSearch").addEventListener("input", renderRecipes);

@@ -29,6 +29,8 @@ public class Chore
     public int? RecurDays { get; set; }
     /// <summary>When a recurring chore is completed, hand the next occurrence to the next family member.</summary>
     public bool Rotate { get; set; }
+    /// <summary>How many days before the due date reminders start; null/0 = on the due day.</summary>
+    public int? RemindDaysBefore { get; set; }
     public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
     public DateTime? CompletedAt { get; set; }
 }

@@ -81,6 +81,7 @@ app.MapPut("/api/chores/{id:int}", async (AppDb db, int id, Chore input) =>
     chore.DueDate = input.DueDate;
     chore.RecurDays = input.RecurDays;
     chore.Rotate = input.Rotate;
+    chore.RemindDaysBefore = input.RemindDaysBefore;
     await db.SaveChangesAsync();
     return Results.Ok(chore);
 });
@@ -118,6 +119,7 @@ app.MapPost("/api/chores/{id:int}/status", async (AppDb db, int id, StatusChange
             DueDate = DateOnly.FromDateTime(DateTime.Today).AddDays(days),
             RecurDays = days,
             Rotate = chore.Rotate,
+            RemindDaysBefore = chore.RemindDaysBefore,
         };
         chore.RecurDays = null; // the new occurrence carries the recurrence forward
         chore.Rotate = false;

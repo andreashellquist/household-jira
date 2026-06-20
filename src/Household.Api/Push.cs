@@ -119,9 +119,13 @@ public class DueChoreNotifier(
         var subs = await db.PushSubs.ToListAsync();
         if (subs.Count == 0) return;
 
-        var dueChores = await db.Chores
-            .Where(c => c.Status != ChoreStatus.Done && c.DueDate != null && c.DueDate <= today)
+        // A chore enters the digest once today reaches (due date − its lead time).
+        var openDated = await db.Chores
+            .Where(c => c.Status != ChoreStatus.Done && c.DueDate != null)
             .ToListAsync();
+        var dueChores = openDated
+            .Where(c => c.DueDate!.Value.AddDays(-(c.RemindDaysBefore ?? 0)) <= today)
+            .ToList();
         if (dueChores.Count == 0) return;
 
         var dirty = false;
